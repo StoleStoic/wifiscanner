@@ -41,7 +41,7 @@ def _already_running(port: int) -> bool:
 
 MENUS = [
     ("File", [("Save Session...\tCtrl+S", "session-save"), ("Import Session File...", "session-import"),
-              ("Open Capture File (pcap)...", "pcap-open"), None, ("Export Table as CSV...", "export-csv"), None,
+              ("Open Capture File (pcap)...", "pcap-open"), None, ("Export Table as CSV...", "export-csv"), ("Export Analysis as CSV...", "export-analysis"), None,
               ("Sessions", "tab:sessions"), ("Settings", "tab:settings"), None, ("Exit", "exit")]),
     ("Edit", [("Copy Table for Excel", "copy"), ("Filter...\tCtrl+F", "find"), None, ("Choose Columns...", "columns"),
               ("Clear Network List", "clear")]),

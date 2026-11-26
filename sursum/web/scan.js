@@ -1,5 +1,6 @@
 // Scan view: sortable network table, freeform filter, export, and the SSID details panel.
-import { $, h, api, color, sigClass, SIG, duration, clock, download, toast, esc } from './util.js';
+import { $, h, api, color, sigClass, SIG, duration, clock, download, toast, esc, menu } from './util.js';
+import { mark } from './threats.js';
 import { S, nets, visible, th, setFilter, select, saveSettings, hist } from './state.js';
 
 const yes = v => (v ? 'Yes' : '');
@@ -107,7 +108,11 @@ export function update() {
   $('#fcount').textContent = S.filterError ? S.filterError : `${rs.length} of ${nets().length}`;
   const head = h('tr', {}, cols.map(c => h('th', { class: c.n ? 'num' : '', onclick: () => { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : (c.n ? -1 : 1) }; update(); } },
     c.l + (sort.k === c.k ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''))));
-  const body = rs.map(n => h('tr', { class: (n.bssid === S.selected ? 'sel ' : '') + (n.connected ? 'me' : ''), onclick: () => select(n.bssid) }, cols.map(c => {
+  const body = rs.map(n => h('tr', { class: (n.bssid === S.selected ? 'sel ' : '') + (n.connected ? 'me' : ''), onclick: () => select(n.bssid), oncontextmenu: e => {
+    e.preventDefault(); select(n.bssid);
+    menu(e.clientX, e.clientY, [['Mark as mine (authorized)', () => mark([n.bssid], 'auth')], ['Mark as neighbor', () => mark([n.bssid], 'neighbor')], ['Remove mark', () => mark([n.bssid], 'none')], null,
+      ['Locate this access point', () => window.sursumGo('threats', { locate: n.bssid })], ['Show its devices on the Map', () => window.sursumGo('map', { ap: n.bssid })], ['Copy BSSID', () => navigator.clipboard.writeText(n.bssid)]]);
+  } }, cols.map(c => {
     if (c.k === 'ssid') return h('td', {}, h('span', { class: 'chip', style: `background:${color(n.bssid)}` }), n.ssid || h('span', { class: 'dim' }, '(hidden)'), n.connected ? h('span', { class: 'badge good', style: 'margin-left:6px' }, 'connected') : null);
     if (c.k === 'rssi') { const k = sigClass(n.rssi, t); return h('td', { class: 'num' }, n.rssi, h('span', { class: 'bar' }, h('i', { style: `width:${n.quality}%;background:${SIG[k]}` }))); }
     if (c.k === 'security') { const weak = ['Open', 'WEP', 'WPA-Personal'].includes(n.security); return h('td', {}, weak ? h('span', { class: 'badge bad' }, n.security) : n.security, n.wps ? h('span', { class: 'badge fair', style: 'margin-left:5px' }, 'WPS') : null); }

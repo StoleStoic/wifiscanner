@@ -103,6 +103,7 @@ const COMMANDS = {
   locate: () => (S.selected ? go('threats', { locate: S.selected }) : toast('Select an access point in the Scan tab first.')),
   'ask-claude': () => press('analysis', 'Ask Claude'), identify: () => press('devices', 'Identify'),
   'theme-light': () => { setTheme('light'); go(S.tab); }, 'theme-dark': () => { setTheme('dark'); go(S.tab); },
+  'export-analysis': () => press('analysis', 'Export CSV'),
   'help-filters': () => go('help', 'filters'), about,
 };
 let ready = false; const queued = [];  // menu clicks made before the first data has loaded wait for it

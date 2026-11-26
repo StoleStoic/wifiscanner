@@ -7,7 +7,7 @@ import time
 from collections import deque
 from typing import Any, Callable
 
-from . import channels
+from . import channels, oui
 from .scanners import ScanError, default_source
 
 HISTORY = 240
@@ -146,6 +146,13 @@ class Engine:
                 conn.setdefault("channel", net["channel"])
                 conn.update(band=net["band"], channel=net["channel"], width=net["width"], security=net["security"])
                 conn["rssi"] = net["rssi"] if abs(net["last_seen"] - now) < 15 else conn.get("rssi")
+            # a virtual BSSID has no vendor of its own: borrow it from a sibling radio of the same unit
+            known = [n for n in self.networks.values() if n["vendor"] and not n["vendor"].startswith("Private")]
+            for n in self.networks.values():
+                if n.get("local_mac") and n["vendor"].startswith("Private"):
+                    sib = next((k for k in known if oui.same_unit(k["bssid"], n["bssid"])), None)
+                    if sib:
+                        n["vendor"] = f"{sib['vendor']} (virtual)"
             interference(list(self.networks.values()))
             prev = self.connection
             self.connection = conn

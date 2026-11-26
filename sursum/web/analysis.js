@@ -1,5 +1,5 @@
 // Analysis view: prioritised notes from the rule engine, plus optional Claude notes.
-import { $, h, api, toast, stamp } from './util.js';
+import { $, h, api, toast, stamp, download, csvCell } from './util.js';
 import { S, select, refreshAnalysis } from './state.js';
 import { ARTICLES } from './help.js';
 
@@ -14,6 +14,9 @@ const note = n => h('div', { class: 'note', style: `border-color:${PRI[n.priorit
   h('div', { class: 'row', style: 'margin-top:4px' },
     ARTICLES[n.article] ? h('a', { href: '#', onclick: e => { e.preventDefault(); window.sursumGo('help', n.article); } }, 'Read: ' + ARTICLES[n.article].title) : null,
     n.bssid ? h('a', { href: '#', onclick: e => { e.preventDefault(); select(n.bssid); window.sursumGo('scan'); } }, 'Show this access point') : null));
+
+const table = (list, sep) => [['Priority', 'Category', 'Title', 'Detail', 'BSSID', 'Source', 'Help article'], ...list.map(n => [n.priority, n.category, n.title, n.detail, n.bssid || '', n.source === 'claude' ? 'Claude' : 'Built-in rules', ARTICLES[n.article]?.title || ''])]
+  .map(r => r.map(v => (sep === ',' ? csvCell(v) : String(v).replace(/[\t\r\n]+/g, ' '))).join(sep)).join('\r\n');
 
 async function askClaude() {
   if (!S.settings.ai.has_key) return toast('Add your Anthropic API key in Settings first.', true);
@@ -36,6 +39,8 @@ function render() {
       h('div', { class: 'seg' }, ['All', 'Security', 'Connectivity', 'Performance', 'Configuration'].map(c => h('button', { class: c === cat ? 'on' : '', onclick: () => { cat = c; render(); } },
         `${c} (${c === 'All' ? all.length : all.filter(n => n.category === c).length})`))),
       h('span', { class: 'grow' }),
+      h('button', { title: 'Copy the notes shown so they paste straight into Excel', onclick: async () => { await navigator.clipboard.writeText(table(list, '\t')); toast('Copied. Paste into Excel.'); } }, 'Copy for Excel'),
+      h('button', { onclick: () => download(`wifi-analysis-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, table(list, ','), 'text/csv') }, 'Export CSV'),
       h('button', { class: 'primary', disabled: S.aiRunning, onclick: askClaude }, S.aiRunning ? 'Claude is analysing…' : 'Ask Claude for a deeper analysis')),
     S.ai.summary ? h('div', { class: 'card' }, h('h2', {}, 'Claude’s summary'), h('p', {}, S.ai.summary), h('p', { class: 'dim' }, `${stamp(S.ai.t)} · ${S.ai.model || ''} · Claude’s notes are marked below and describe the scan at that time.`)) : null,
     S.ai.error ? h('div', { class: 'note', style: 'border-color:#ef5b5b' }, S.ai.error) : null,

@@ -17,7 +17,9 @@ WEAK = ("Open", "WEP", "WPA-Personal")
 
 def estimate_distance(n: dict, exponent: float = 3.0) -> dict[str, float]:
     """Log-distance path-loss estimate in metres. Rough: walls and antennas vary a lot."""
-    tx = n.get("tx_power") if n.get("tx_power") is not None else (20 if n["band"] == "2.4" else 23)
+    tx = n.get("tx_power")
+    if tx is None or not 10 <= tx <= 30:  # TPC reports are often absent or nonsense; fall back to typical power
+        tx = 20 if n["band"] == "2.4" else 23
     fspl_1m = 20 * math.log10(n["freq"]) - 27.55
     loss = tx - n["rssi"] - fspl_1m
 
@@ -77,26 +79,34 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
         elif not ctx["configured"]:
             it.update(cls="unclassified", severity="Info", label="Unclassified")
         elif n["ssid"] and n["ssid"] in home:
-            adjacent = next((a for a in auth if _near(a, b)), None)
-            weaker = n["security"] != auth_sec.get(n["ssid"], n["security"])
-            if adjacent and not weaker:
-                it.update(cls="unauthorized", severity="Medium", label="Unlisted radio of your AP?")
-                it["reasons"].append(f"Broadcasts your SSID and its address is next to authorized AP {adjacent}; "
-                                     "probably another radio of the same unit. Authorize it if it is yours.")
-            else:
+            unit = next((a for a in auth if oui.same_unit(a, b) or _near(a, b)), None)
+            real = auth_sec.get(n["ssid"])  # security of your authorized APs with this name, if any
+            if real and n["security"] != real:
                 it.update(cls="rogue", severity="Critical", label="Evil twin / SSID spoof")
-                it["reasons"].append(f"Broadcasts your network name '{n['ssid']}' from a BSSID that is not in your authorized list.")
-                if weaker:
-                    it["reasons"].append(f"Its security ({n['security']}) differs from your real network "
-                                         f"({auth_sec.get(n['ssid'])}) - a classic impersonation sign.")
+                it["reasons"].append(f"Broadcasts your network name '{n['ssid']}' from a BSSID that is not in your "
+                                     f"authorized list, and its security ({n['security']}) differs from your real "
+                                     f"network ({real}) - a classic impersonation sign.")
+            elif n["security"] in WEAK:
+                it.update(cls="rogue", severity="Critical", label="Unprotected AP using your network name")
+                it["reasons"].append(f"Broadcasts your network name '{n['ssid']}' with no real encryption. If it is "
+                                     "your own equipment it is misconfigured or factory-reset; otherwise it is an impersonator.")
+            elif unit:
+                it.update(cls="unauthorized", severity="Low", label="Unlisted radio of your AP")
+                it["reasons"].append(f"Uses your network name and belongs to the same unit as authorized AP {unit}. "
+                                     "Almost certainly yours: click Mine to add it.")
+            else:
+                it.update(cls="unauthorized", severity="High", label="Unverified AP using your network name")
+                it["reasons"].append(f"Broadcasts your network name '{n['ssid']}' with matching security, but this "
+                                     "radio is not in your authorized list. If it is one of your access points, "
+                                     "authorize it; if you do not recognise it, locate it.")
         elif lan_hit:
             it.update(cls="rogue", severity="Critical", label="Rogue AP on your network")
             it["reasons"].append(f"Its radio address matches or sits next to {lan_hit}, a device found on your wired/LAN side. "
                                  "An unapproved AP appears to be plugged into your network.")
-        elif any(_near(a, b) for a in auth):
-            it.update(cls="unauthorized", severity="Medium", label="Unlisted radio of your AP?")
-            it["reasons"].append("Address is adjacent to one of your authorized APs (often a guest or IoT network). "
-                                 "Authorize it if you recognise it.")
+        elif any(oui.same_unit(a, b) or _near(a, b) for a in auth):
+            it.update(cls="unauthorized", severity="Low", label="Unlisted radio of your AP")
+            it["reasons"].append("Belongs to the same unit as one of your authorized APs (a guest, IoT, hidden or "
+                                 "mesh-link network). Click Mine to add it.")
         elif dist["m"] <= perimeter:
             it.update(cls="unauthorized", severity="High", label="Unauthorized AP in your airspace")
             it["reasons"].append(f"Unknown AP estimated about {dist['m']} m away, inside your {perimeter:g} m home perimeter.")
@@ -173,13 +183,18 @@ def notes(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict]) 
         return f"{n['ssid'] or '(hidden)'} on {n['band']} GHz ch {n['channel']} ({n['bssid']})"
 
     # ---- security
+    unlisted = [t for t in th["aps"] if t["label"] == "Unlisted radio of your AP"]
+    if unlisted:
+        add("Configuration", "Low", f"{len(unlisted)} radio(s) of your own access points are not in your list yet",
+            "They share a unit with access points you authorized (extra bands, guest, hidden or mesh-link networks). "
+            "In the Threats tab, use 'Add all radios of my access points' to include them.", "getting-started")
     for t in th["aps"]:
         if t["cls"] == "rogue":
             add("Security", "Very High", f"{t['label']}: {t['ssid'] or '(hidden)'}", " ".join(t["reasons"]) +
                 " Do not connect to it. Use the Locate tool to walk towards it and find the device.", "rogue-ap", t["bssid"])
         elif t["cls"] == "unauthorized" and t["severity"] == "High":
-            add("Security", "High", f"Unauthorized AP nearby: {t['ssid'] or '(hidden)'}", " ".join(t["reasons"]) +
-                " If it is yours, authorize it; if it is a neighbor, mark it so.", "unauthorized-ap", t["bssid"])
+            add("Security", "High", f"{t['label']}: {t['ssid'] or '(hidden)'}", " ".join(t["reasons"]) +
+                " Mark it as Mine or Neighbor in the Threats tab once you know.", "unauthorized-ap", t["bssid"])
     for e in th["events"]:
         add("Security", "High", "This PC is connected to a non-authorized access point", " ".join(e["reasons"]) +
             " Disconnect and remove that network from Windows' saved networks if you did not intend this.",

@@ -294,3 +294,42 @@ class Devices(unittest.TestCase):
         _, stats = pcap.read(cap)
         self.assertEqual([(s["mac"], s["bssid"], s["frames"], s["rssi"]) for s in stats["stations"]],
                          [("a4:83:e7:1c:5b:02", "3c:28:6d:a1:10:02", 3, -61)])
+
+
+class RealHome(unittest.TestCase):
+    """Address patterns taken from a real multi-AP home scan."""
+
+    def test_same_unit(self):
+        yes = [("e8:9c:25:00:1a:40", "e8:9c:25:00:1a:48"), ("74:ac:b9:27:52:30", "7a:ac:b9:27:52:30"),
+               ("74:ac:b9:27:52:30", "82:ac:b9:28:52:30"), ("d0:21:f9:86:60:dd", "d2:21:f9:b6:60:de"),
+               ("cc:28:aa:5e:a6:52", "cc:28:aa:5e:a6:55"), ("0c:7c:28:97:89:ec", "0c:7c:28:97:89:f4"),
+               ("e4:38:83:49:dd:6e", "e6:38:83:19:dd:6f")]
+        no = [("10:7c:61:50:76:c0", "10:7c:61:50:77:80"), ("74:ac:b9:27:52:30", "74:83:c2:bd:7b:2b"),
+              ("0c:7c:28:97:89:ec", "0c:7c:28:d2:cb:d8"), ("e8:9c:25:00:1a:40", "cc:28:aa:5e:a6:52")]
+        for a, b in yes:
+            self.assertTrue(oui.same_unit(a, b), (a, b))
+        for a, b in no:
+            self.assertFalse(oui.same_unit(a, b), (a, b))
+
+    def test_own_mesh_is_not_called_rogue(self):
+        def ap(bssid, ssid, sec="wpa2", band="5", channel=44, hidden=0, rssi=-60):
+            return net(bssid=bssid, ssid=ssid, sec=sec, band=band, channel=channel, hidden=hidden, rssi=rssi,
+                       width=20 if band == "2.4" else 80, std="ax")
+        nets = [ap("e8:9c:25:00:1a:40", "Caveat", band="2.4", channel=11), ap("e8:9c:25:00:1a:44", "Caveat"),
+                ap("cc:28:aa:5e:a6:55", "private"), ap("10:7c:61:50:76:c4", "private"),
+                ap("10:7c:61:50:77:84", "ASUS", sec="open"),
+                ap("74:ac:b9:27:52:30", "vcissgroup", band="2.4", channel=1), ap("7a:ac:b9:27:52:30", "", hidden=1, band="2.4", channel=1),
+                ap("bc:07:1d:2d:dc:c7", "Grinnfamily", rssi=-85)]
+        interference(nets)
+        s = _merge(DEFAULTS, {})
+        s["home"]["ssids"] = ["Caveat", "private", "ASUS", "vcissgroup"]
+        s["inventory"]["aps"] = [{"bssid": "e8:9c:25:00:1a:40"}, {"bssid": "74:ac:b9:27:52:30"}]
+        by = {t["bssid"]: t for t in analysis.classify(nets, None, s, [])["aps"]}
+        self.assertEqual(by["e8:9c:25:00:1a:44"]["label"], "Unlisted radio of your AP")       # other band, same unit
+        self.assertEqual(by["7a:ac:b9:27:52:30"]["label"], "Unlisted radio of your AP")       # hidden virtual network
+        self.assertEqual((by["cc:28:aa:5e:a6:55"]["cls"], by["cc:28:aa:5e:a6:55"]["severity"]), ("unauthorized", "High"))
+        self.assertEqual(by["10:7c:61:50:77:84"]["label"], "Unprotected AP using your network name")
+        self.assertEqual(by["bc:07:1d:2d:dc:c7"]["cls"], "neighbor")
+        self.assertEqual([t["bssid"] for t in by.values() if t["label"] == "Evil twin / SSID spoof"], [])
+        far = analysis.estimate_distance(dict(rssi=-79, freq=5300, band="5", tx_power=127))
+        self.assertLess(far["m"], 200)  # a nonsense transmit-power report must not blow up the estimate

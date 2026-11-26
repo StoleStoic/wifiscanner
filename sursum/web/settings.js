@@ -21,7 +21,7 @@ function render() {
       F('Forget a network after', num(s.scan.max_age, v => save({ scan: { max_age: Math.max(10, v || 120) } }), { min: 10 }), 'seconds without hearing it'),
       F('WiFi adapter', txt(s.scan.interface, v => save({ scan: { interface: v } }), { placeholder: 'automatic' }), 'Part of the adapter name, only needed with more than one adapter. Applies after restart.')),
     h('div', { class: 'card' }, h('h2', {}, 'Home and threat detection'),
-      F('My network names (SSIDs)', txt(s.home.ssids.join(', '), v => save({ home: { ssids: v.split(',').map(x => x.trim()).filter(Boolean) } }), { style: 'width:320px' }), 'comma separated'),
+      F('My network names (SSIDs)', txt(s.home.ssids.join(', '), v => save({ home: { ssids: v.split(',').map(x => x.trim()).filter(Boolean) } }), { style: 'width:320px' }), 'comma separated. Naming a network here does not authorize its access points: do that under Threats > Your networks.'),
       F('Home perimeter', num(s.home.perimeter_m, v => save({ home: { perimeter_m: v || 15 } }), { min: 1 }), 'metres from this PC; unknown APs estimated closer than this are flagged as unauthorized'),
       F('Wall factor (path-loss exponent)', num(s.home.path_loss_exp, v => save({ home: { path_loss_exp: Math.min(5, Math.max(2, v || 3)) } }), { min: 2, max: 5, step: 0.1 }), '2 = open air, 3 = typical house, 4 = many thick walls. Higher values give shorter distance estimates.'),
       F('Home latitude', num(s.home.lat, v => save({ home: { lat: v } }), { step: 'any', style: 'width:140px' }), 'optional; used with a Survey to give approximate coordinates of located APs'),

@@ -111,3 +111,12 @@ export function menu(x, y, items) {
   setTimeout(() => document.addEventListener('pointerdown', function f(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('pointerdown', f); } }), 0);
 }
 export const AUTH = { true: ['Authorized', '#3ecf8e'], false: ['Not authorized', '#ef5b5b'], null: ['Unreviewed', '#f0913a'] };
+
+// Two BSSIDs that look like radios / virtual networks of one physical access point (mirrors oui.same_unit).
+export function sameUnit(a, b) {
+  const x = a.split(':').map(v => parseInt(v, 16)), y = b.split(':').map(v => parseInt(v, 16));
+  if (a === b || x.length !== 6 || y.length !== 6) return false;
+  if (x[1] !== y[1] || x[2] !== y[2] || x[4] !== y[4] || Math.abs(x[5] - y[5]) > 8) return false;
+  return Math.abs(x[3] - y[3]) <= 1 || (x[3] & 15) === (y[3] & 15);
+}
+export const csvCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
