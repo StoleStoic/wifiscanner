@@ -105,10 +105,12 @@ const COMMANDS = {
   'theme-light': () => { setTheme('light'); go(S.tab); }, 'theme-dark': () => { setTheme('dark'); go(S.tab); },
   'help-filters': () => go('help', 'filters'), about,
 };
-window.sursumMenu = cmd => { try { cmd.startsWith('tab:') ? go(cmd.slice(4)) : COMMANDS[cmd]?.(); } catch (e) { toast(String(e), true); } return S.tab; };
+let ready = false; const queued = [];  // menu clicks made before the first data has loaded wait for it
+const runCommand = cmd => { try { cmd.startsWith('tab:') ? go(cmd.slice(4)) : COMMANDS[cmd]?.(); } catch (e) { toast(String(e), true); } };
+window.sursumMenu = cmd => { if (cmd) ready ? runCommand(cmd) : queued.push(cmd); return ready ? S.tab : 'loading'; };
 document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); COMMANDS.find(); } if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); COMMANDS['session-save'](); } });
 
 let saved = null; try { saved = localStorage.getItem('theme'); } catch { /* storage unavailable */ }
 setTheme(saved || 'light');
 
-init().then(() => go('scan')).catch(e => { toast('Could not reach the scanner backend: ' + e.message, true); });
+init().then(() => { go('scan'); ready = true; queued.splice(0).forEach(runCommand); }).catch(e => { toast('Could not reach the scanner backend: ' + e.message, true); });

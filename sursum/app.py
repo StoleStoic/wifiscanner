@@ -78,7 +78,10 @@ def _window(url: str, selftest: bool = False) -> None:
             for title, items in MENUS]
 
     def check() -> None:  # used by the automated build: drive the UI through a menu command
-        time.sleep(6)
+        for _ in range(40):  # wait for the page to finish loading
+            if win.evaluate_js("window.sursumMenu ? window.sursumMenu(String()) : 'loading'") != "loading":
+                break
+            time.sleep(0.5)
         actions["tab:spectrum"]()
         time.sleep(1.5)
         _log(f"selftest: tab={win.evaluate_js('window.sursumMenu(String())')} "
