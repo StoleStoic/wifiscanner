@@ -60,7 +60,7 @@ function table() {
     h('tbody', {}, rs.length ? rs.map(d => h('tr', { class: d.mac === shown ? 'sel' : '', onclick: e => { if (!['SELECT', 'INPUT', 'OPTION'].includes(e.target.tagName)) { shown = d.mac; table(); detail(); } },
       oncontextmenu: e => { e.preventDefault(); menu(e.clientX, e.clientY, [['Authorize', () => deviceAction('update', [d.mac], { authorized: true })], ['Not authorized', () => deviceAction('update', [d.mac], { authorized: false })], null, ['Show on map', () => window.sursumGo('map', { mac: d.mac })], ['Identify with Claude', () => identify([d.mac])]]); } },
       h('td', {}, h('input', { type: 'checkbox', checked: picked.has(d.mac), onchange: e => { e.target.checked ? picked.add(d.mac) : picked.delete(d.mac); render(); } })),
-      h('td', {}, h('span', { class: 'dot', style: `background:${d.online ? '#3ecf8e' : '#4a5270'}`, title: d.online ? 'Answered in the last network scan' : 'Not seen in the last network scan' }), label(d),
+      h('td', {}, h('span', { class: 'dot', style: `background:${d.online ? '#3ecf8e' : '#b5b5b5'}`, title: d.online ? 'Answered in the last network scan' : 'Not seen in the last network scan' }), label(d),
         d.self ? h('span', { class: 'badge info', style: 'margin-left:6px' }, 'This PC') : d.gateway ? h('span', { class: 'badge info', style: 'margin-left:6px' }, 'Router') : null),
       h('td', {}, authSel(d)), h('td', {}, typeSel(d), d.type_source === 'claude' ? h('span', { class: 'badge info', style: 'margin-left:5px' }, 'Claude') : null),
       h('td', {}, d.vendor), h('td', {}, d.ips[0] || ''), h('td', {}, d.mac, d.random_mac ? h('span', { class: 'badge', style: 'margin-left:6px', title: 'Randomised private address' }, 'private') : null),

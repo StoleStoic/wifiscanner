@@ -10,7 +10,8 @@ It runs entirely on your own PC and shows its screens in your web browser.
 2. Run it. Windows may show "Windows protected your PC" because the installer is not code-signed:
    choose **More info**, then **Run anyway**.
 3. Start **Stole Sursum WiFi Scanner** from the Start menu or the desktop shortcut. It opens in its
-   own window; closing the window quits it.
+   own window with a File / Edit / View / Scan / Tools / Help menu bar; closing the window quits it.
+   View > Dark Theme switches from the standard light Windows look.
 
 Nothing else needs installing. To remove it, use Windows Settings > Apps > Installed apps.
 The Start menu also has **Stole Sursum WiFi Scanner (Demo mode)**, which shows a simulated

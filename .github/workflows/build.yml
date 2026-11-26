@@ -56,23 +56,32 @@ jobs:
           $exe = "$env:LOCALAPPDATA\Programs\Stole Sursum WiFi Scanner\SursumWiFiScanner.exe"
           $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Stole Sursum WiFi Scanner.lnk"
           foreach ($f in $exe, $menu, "$env:USERPROFILE\Desktop\Stole Sursum WiFi Scanner.lnk") { if (-not (Test-Path $f)) { throw "missing after install: $f" } }
-          $p = Start-Process $exe -ArgumentList "--demo" -PassThru
-          Start-Sleep -Seconds 20
+          $p = Start-Process $exe -ArgumentList "--demo","--selftest" -PassThru
+          Start-Sleep -Seconds 25
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$pwd\dist\app-window.png")
           try { $s = Invoke-RestMethod http://127.0.0.1:8737/api/state } finally { Get-Content "$env:APPDATA\StoleSursum\app.log" -ErrorAction SilentlyContinue }
           $title = (Get-Process -Id $p.Id).MainWindowTitle
           "Window title: '$title'; version $($s.version); $($s.networks.Count) networks"
           Stop-Process -Id $p.Id -Force
           if ($s.networks.Count -lt 10) { throw "demo scan returned $($s.networks.Count) networks" }
-          if (-not (Select-String -Path "$env:APPDATA\StoleSursum\app.log" -Pattern "window: native" -Quiet)) { throw "the app did not open its own window" }
+          if (-not (Select-String -Path "$env:APPDATA\StoleSursum\app.log" -Pattern "menu bar with 6 menus" -Quiet)) { throw "the app did not open its own window with a menu bar" }
+          if (-not (Select-String -Path "$env:APPDATA\StoleSursum\app.log" -Pattern "selftest: tab=spectrum theme=light" -Quiet)) { throw "menu commands do not reach the app" }
           $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Stole Sursum WiFi Scanner\unins*.exe" | Select-Object -First 1
           Start-Process $un.FullName -ArgumentList "/VERYSILENT","/NORESTART" -Wait
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { throw "uninstall left the program behind" }
           "Uninstall removed the program."
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: SursumWiFiScanner-Setup
-          path: dist/SursumWiFiScanner-Setup.exe
+          path: |
+            dist/SursumWiFiScanner-Setup.exe
+            dist/app-window.png
       - name: Publish release
         if: github.event_name == 'push'
         env:

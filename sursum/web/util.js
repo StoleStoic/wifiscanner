@@ -55,7 +55,7 @@ export const ago = (t, now) => { const s = Math.max(0, Math.round(now - t)); ret
 export function color(bssid, alpha = 1) {
   let x = 0;
   for (const c of bssid || '') x = (x * 31 + c.charCodeAt(0)) >>> 0;
-  return `hsla(${(x * 137.508) % 360}, 72%, 62%, ${alpha})`;
+  return `hsla(${(x * 137.508) % 360}, 72%, ${INK.light}%, ${alpha})`;
 }
 export function sigClass(rssi, th) {
   return rssi >= th.good ? 'good' : rssi >= th.fair ? 'fair' : rssi >= th.poor ? 'poor' : 'bad';
@@ -73,7 +73,20 @@ export function canvas(cv) {
   ctx.font = '11px system-ui, "Segoe UI", sans-serif';
   return { ctx, w, h: ht };
 }
-export const INK = { grid: 'rgba(255,255,255,.07)', axis: '#8892a6', text: '#c9d1e0', dim: '#667089' };
+const THEMES = {
+  dark: { grid: 'rgba(255,255,255,.07)', axis: '#8892a6', text: '#c9d1e0', dim: '#667089', bg: '#0e1220', panel: '#161b2e', panel2: '#1c2238', veil: 'rgba(22,27,46,.88)', off: '#4a5270', light: 62 },
+  light: { grid: 'rgba(0,0,0,.08)', axis: '#5f5f5f', text: '#1b1b1b', dim: '#767676', bg: '#ffffff', panel: '#ffffff', panel2: '#f3f3f3', veil: 'rgba(255,255,255,.9)', off: '#b5b5b5', light: 42 },
+};
+// Colours used when drawing on canvases; switched in place by setTheme().
+export const INK = { ...THEMES.dark };
+export function setTheme(name) {
+  name = name === 'dark' ? 'dark' : 'light';
+  Object.assign(INK, THEMES[name]);
+  document.documentElement.classList.toggle('light', name === 'light');
+  try { localStorage.setItem('theme', name); } catch { /* storage unavailable */ }
+  return name;
+}
+export const theme = () => (document.documentElement.classList.contains('light') ? 'light' : 'dark');
 
 export function download(name, text, type = 'text/plain') {
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });

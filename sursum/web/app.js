@@ -1,4 +1,4 @@
-import { $, h, api, sel, toast } from './util.js';
+import { $, h, api, sel, toast, setTheme, theme, download } from './util.js';
 import { S, on, init, emit, setLoaded } from './state.js';
 import * as scan from './scan.js';
 import * as charts from './charts.js';
@@ -79,5 +79,36 @@ on('analysis', () => current?.onAnalysis?.());
 on('select', b => current?.onSelect?.(b));
 on('devices', () => { current?.onDevices?.(); renderTabs(); });
 window.addEventListener('resize', () => current?.update?.());
+
+// ---- commands from the native menu bar (and usable from anywhere in the UI)
+const press = async (tab, label) => { go(tab); await new Promise(r => setTimeout(r, 60)); [...document.querySelectorAll('#main button')].find(b => b.textContent.trim().startsWith(label))?.click(); };
+function about() {
+  const box = h('div', { id: 'about', onclick: e => e.target === box && box.remove() }, h('div', {},
+    h('h2', {}, 'Stole Sursum WiFi Scanner'), h('p', {}, `Version ${S.version || ''}`),
+    h('p', { class: 'dim' }, 'Personal WiFi scanning, analysis, troubleshooting and threat detection for Windows 11. Everything runs on this PC; nothing leaves it except speed tests and, when you use them, the Claude features.'),
+    h('div', { class: 'row', style: 'justify-content:flex-end;margin-top:14px' }, h('button', { class: 'primary', onclick: () => box.remove() }, 'OK'))));
+  document.body.append(box);
+}
+const COMMANDS = {
+  'session-save': () => press('sessions', 'Save current scan'), 'session-import': () => press('sessions', 'Import session file'),
+  'pcap-open': () => press('sessions', 'Open pcap file'),
+  'export-csv': () => download(`wifi-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, scan.toDelimited(','), 'text/csv'),
+  copy: async () => { await navigator.clipboard.writeText(scan.toDelimited('\t')); toast('Copied. Paste into Excel.'); },
+  find: () => { go('scan'); $('#filter')?.focus(); },
+  clear: async () => { await api('/api/scan', { action: 'clear' }); S.history = {}; },
+  columns: () => press('scan', 'Columns'),
+  pause: () => api('/api/scan', { action: 'pause' }), resume: () => api('/api/scan', { action: 'resume' }), rescan: () => api('/api/scan', { action: 'rescan' }),
+  'source-windows': () => api('/api/scan', { action: 'source', source: 'windows' }), 'source-demo': () => api('/api/scan', { action: 'source', source: 'demo' }),
+  'scan-devices': () => press('devices', 'Scan my network'), 'speedtest': () => press('speed', 'Run speed test'),
+  locate: () => (S.selected ? go('threats', { locate: S.selected }) : toast('Select an access point in the Scan tab first.')),
+  'ask-claude': () => press('analysis', 'Ask Claude'), identify: () => press('devices', 'Identify'),
+  'theme-light': () => { setTheme('light'); go(S.tab); }, 'theme-dark': () => { setTheme('dark'); go(S.tab); },
+  'help-filters': () => go('help', 'filters'), about,
+};
+window.sursumMenu = cmd => { try { cmd.startsWith('tab:') ? go(cmd.slice(4)) : COMMANDS[cmd]?.(); } catch (e) { toast(String(e), true); } return S.tab; };
+document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); COMMANDS.find(); } if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); COMMANDS['session-save'](); } });
+
+let saved = null; try { saved = localStorage.getItem('theme'); } catch { /* storage unavailable */ }
+setTheme(saved || 'light');
 
 init().then(() => go('scan')).catch(e => { toast('Could not reach the scanner backend: ' + e.message, true); });

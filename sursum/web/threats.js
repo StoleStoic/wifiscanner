@@ -41,7 +41,7 @@ function drawRadar(cv) {
       ctx.strokeStyle = col; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke(); ctx.globalAlpha = 1;
     }
     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, py, big ? 7 : 4.5, 0, 7); ctx.fill();
-    if (e) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.lineWidth = 1; }
+    if (e) { ctx.strokeStyle = INK.text; ctx.lineWidth = 1.5; ctx.stroke(); ctx.lineWidth = 1; }
     if (big || t.severity !== 'Low' && t.cls !== 'unclassified') { ctx.fillStyle = INK.text; ctx.fillText(t.ssid || '(hidden)', px + 9, py); }
     // little dots: the devices known to use this access point
     S.devices.filter(d => d.ap === t.bssid).slice(0, 14).forEach((d, i, arr) => {
@@ -147,7 +147,7 @@ function render() {
           menu(e.clientX, e.clientY, [[`Show devices (${n})`, () => window.sursumGo('map', { ap: b })], ['Locate this access point', () => { locate = b; peak = -200; select(b); locator(); $('#main').scrollTop = 0; }], null,
             ['Mark as mine', () => mark([b], 'auth')], ['Mark as neighbor', () => mark([b], 'neighbor')], ['Show in Scan', () => { select(b); window.sursumGo('scan'); }]]);
         }, onclick: e => { const r = e.target.getBoundingClientRect(), b = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); if (b) select(b); } }),
-        h('p', { class: 'dim' }, 'Small dots next to an access point are the devices known to use it; right-click an access point and choose Show devices to see them on the Map. Distance from this PC is estimated from signal strength (walls can easily double or halve it). Direction is only real for dots with a white outline, which were located from a walk-through Survey; a single WiFi adapter cannot sense direction, so other dots are placed at an arbitrary angle. Use Locate to find a device.')),
+        h('p', { class: 'dim' }, 'Small dots next to an access point are the devices known to use it; right-click an access point and choose Show devices to see them on the Map. Distance from this PC is estimated from signal strength (walls can easily double or halve it). Direction is only real for outlined dots, which were located from a walk-through Survey; a single WiFi adapter cannot sense direction, so other dots are placed at an arbitrary angle. Use Locate to find a device.')),
       h('div', { class: 'card' }, h('h2', {}, 'How access points are classified'),
         [['Critical', 'Rogue access point', 'Uses your network name from an unknown radio (evil twin), or its address matches a device on your own LAN.'],
           ['High', 'Unauthorized access point', 'Unknown AP estimated inside your home perimeter. Becomes rogue if tied to your network.'],

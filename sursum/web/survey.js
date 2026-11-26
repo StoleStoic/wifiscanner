@@ -58,7 +58,7 @@ function draw() {
   cv.width = s.w; cv.height = s.h;
   if (img) ctx.drawImage(img, 0, 0, s.w, s.h);
   else {
-    ctx.fillStyle = '#10152a'; ctx.fillRect(0, 0, s.w, s.h); ctx.strokeStyle = 'rgba(255,255,255,.08)';
+    ctx.fillStyle = INK.panel2; ctx.fillRect(0, 0, s.w, s.h); ctx.strokeStyle = INK.grid;
     const step = 1 / s.mpp;
     for (let x = 0; x < s.w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, s.h); ctx.stroke(); }
     for (let y = 0; y < s.h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(s.w, y); ctx.stroke(); }

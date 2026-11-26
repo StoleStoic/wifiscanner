@@ -35,7 +35,7 @@ function draw() {
   const X = { hub: 60, apA: 290, devA: 440, apB: Math.max(760, w * 0.58), devB: Math.max(910, w * 0.58 + 150) }, hubY = Math.max(60, total(colA) / 2 + 20);
   const curve = (x1, y1, x2, y2, col, dashed, hot) => { ctx.strokeStyle = col; ctx.lineWidth = hot ? 2.4 : 1.2; ctx.setLineDash(dashed ? [4, 4] : []); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.bezierCurveTo((x1 + x2) / 2, y1, (x1 + x2) / 2, y2, x2, y2); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1; };
   ctx.textBaseline = 'middle';
-  const text = (t, x, y, col) => { const tw = ctx.measureText(t).width, x0 = ctx.textAlign === 'right' ? x - tw : x; ctx.fillStyle = 'rgba(22,27,46,.88)'; ctx.fillRect(x0 - 3, y - 7, tw + 6, 14); ctx.fillStyle = col; ctx.fillText(t, x, y); };
+  const text = (t, x, y, col) => { const tw = ctx.measureText(t).width, x0 = ctx.textAlign === 'right' ? x - tw : x; ctx.fillStyle = INK.veil; ctx.fillRect(x0 - 3, y - 7, tw + 6, 14); ctx.fillStyle = col; ctx.fillText(t, x, y); };
   const column = (col, xa, xd, fromHub, links) => {
     let y = 20;
     for (const b of col) {
@@ -43,18 +43,18 @@ function draw() {
       if (links && fromHub) curve(X.hub + 22, hubY, xa - 13, cy, n ? 'rgba(62,207,142,.45)' : 'rgba(136,146,166,.45)', !n, false);
       b.list.forEach((d, i) => {
         const dy = y + 6 + ROW / 2 + i * ROW + Math.max(0, (b.hgt - 12 - b.list.length * ROW) / 2), dhot = focus === d.mac || (focus && focus === d.ap);
-        if (links) { curve(xa + 13, cy, xd - 8, dy, dhot ? '#fff' : devColor(d), !n || !SOLID.includes(d.ap_source), dhot); return; }
-        ctx.fillStyle = devColor(d); ctx.strokeStyle = focus === d.mac ? '#fff' : d.self ? '#5aa9f5' : '#0e1220'; ctx.lineWidth = focus === d.mac || d.self ? 2.5 : 1.5;
+        if (links) { curve(xa + 13, cy, xd - 8, dy, dhot ? INK.text : devColor(d), !n || !SOLID.includes(d.ap_source), dhot); return; }
+        ctx.fillStyle = devColor(d); ctx.strokeStyle = focus === d.mac ? INK.text : d.self ? '#5aa9f5' : INK.bg; ctx.lineWidth = focus === d.mac || d.self ? 2.5 : 1.5;
         ctx.beginPath(); ctx.arc(xd, dy, 6, 0, 7); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
-        ctx.textAlign = 'left'; ctx.fillStyle = focus === d.mac ? '#fff' : INK.text; const name = (d.name || d.hostname || d.model_guess || d.mac).slice(0, 30); ctx.fillText(name, xd + 12, dy);
-        ctx.fillStyle = INK.dim; ctx.fillText(`${d.type === 'Unknown' ? 'unknown type' : d.type}${d.ips[0] ? ' · ' + d.ips[0] : ''}`, xd + 20 + ctx.measureText(name).width, dy);
+        ctx.textAlign = 'left'; ctx.fillStyle = INK.text; ctx.font = focus === d.mac ? 'bold 11px system-ui' : '11px system-ui'; const name = (d.name || d.hostname || d.model_guess || d.mac).slice(0, 30); ctx.fillText(name, xd + 12, dy);
+        const nw = ctx.measureText(name).width; ctx.font = '11px system-ui'; ctx.fillStyle = INK.dim; ctx.fillText(`${d.type === 'Unknown' ? 'unknown type' : d.type}${d.ips[0] ? ' · ' + d.ips[0] : ''}`, xd + 20 + nw, dy);
         hits.push({ x: xd, y: dy, r: 9, dev: d });
       });
       if (links) { y += b.hgt + GAP; continue; }
       if (n) {
-        ctx.fillStyle = n.ghost ? '#4a5270' : apColor(n); ctx.strokeStyle = hot ? '#fff' : '#0e1220'; ctx.lineWidth = hot ? 3 : 2;
+        ctx.fillStyle = n.ghost ? INK.off : apColor(n); ctx.strokeStyle = hot ? INK.text : INK.bg; ctx.lineWidth = hot ? 3 : 2;
         ctx.beginPath(); ctx.roundRect(xa - 12, cy - 12, 24, 24, 5); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
-        ctx.fillStyle = '#0e1220'; ctx.textAlign = 'center'; ctx.font = 'bold 10px system-ui'; ctx.fillText('AP', xa, cy + 1); ctx.font = '11px system-ui';
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 10px system-ui'; ctx.fillText('AP', xa, cy + 1); ctx.font = '11px system-ui';
         ctx.textAlign = 'right'; text((n.ssid || '(hidden)').slice(0, 22), xa - 18, cy - 7, INK.text);
         text(n.ghost ? n.bssid : `${n.band} GHz ch ${n.channel} · ${n.rssi} dBm`, xa - 18, cy + 7, INK.dim);
         hits.push({ x: xa, y: cy, r: 15, ap: n });
@@ -67,7 +67,7 @@ function draw() {
     }
   };
   for (const links of [true, false]) { column(colA, X.apA, X.devA, true, links); column(colB, X.apB, X.devB, false, links); }
-  ctx.fillStyle = '#1c2238'; ctx.strokeStyle = '#3ecf8e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X.hub, hubY, 24, 0, 7); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = INK.panel2; ctx.strokeStyle = '#3ecf8e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X.hub, hubY, 24, 0, 7); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
   ctx.textAlign = 'center'; ctx.fillStyle = INK.text; ctx.fillText('My', X.hub, hubY - 6); ctx.fillText('network', X.hub, hubY + 7);
   if (colB.length) { ctx.textAlign = 'left'; ctx.fillStyle = INK.dim; ctx.fillText('OTHER ACCESS POINTS IN RANGE', X.apB - 110, 8); }
   $('#mapinfo').textContent = `${aps.length} access point(s), ${devs.length} device(s). ${loose.length} device(s) on your network have no known access point.`;
