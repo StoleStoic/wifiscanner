@@ -35,7 +35,8 @@ jobs:
           python-version: "3.12"
       - name: Stamp version
         shell: pwsh
-        run: (Get-Content sursum/__init__.py) -replace '__version__ = ".*"', "__version__ = `"$env:APP_VERSION`"" | Set-Content sursum/__init__.py
+        run: |
+          (Get-Content sursum/__init__.py) -replace '__version__ = ".*"', "__version__ = `"$env:APP_VERSION`"" | Set-Content sursum/__init__.py
       - name: Build program
         run: |
           python -m pip install pyinstaller pywebview anthropic
@@ -76,4 +77,8 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ env.APP_VERSION }}" dist/SursumWiFiScanner-Setup.exe --target "${{ github.sha }}" --title "Stole Sursum WiFi Scanner ${{ env.APP_VERSION }}" --notes "Download SursumWiFiScanner-Setup.exe below and run it. Windows may show 'Windows protected your PC' because the installer is not code-signed: choose More info, then Run anyway." --latest
+        shell: pwsh
+        run: |
+          $notes = "Download SursumWiFiScanner-Setup.exe below and run it. Windows may show 'Windows protected your PC' because the installer is not code-signed. Choose More info, then Run anyway."
+          gh release create "v$env:APP_VERSION" dist/SursumWiFiScanner-Setup.exe --target "${{ github.sha }}" --title "Stole Sursum WiFi Scanner $env:APP_VERSION" --notes $notes --latest
+          if ($LASTEXITCODE) { throw "release failed" }
