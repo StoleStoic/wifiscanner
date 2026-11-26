@@ -26,7 +26,7 @@ function render() {
       F('Wall factor (path-loss exponent)', num(s.home.path_loss_exp, v => save({ home: { path_loss_exp: Math.min(5, Math.max(2, v || 3)) } }), { min: 2, max: 5, step: 0.1 }), '2 = open air, 3 = typical house, 4 = many thick walls. Higher values give shorter distance estimates.'),
       F('Home latitude', num(s.home.lat, v => save({ home: { lat: v } }), { step: 'any', style: 'width:140px' }), 'optional; used with a Survey to give approximate coordinates of located APs'),
       F('Home longitude', num(s.home.lon, v => save({ home: { lon: v } }), { step: 'any', style: 'width:140px' })),
-      F('Network to sweep in IP Scanner', txt(s.ipscan.cidr, v => save({ ipscan: { cidr: v } }), { placeholder: 'automatic, e.g. 192.168.1.0/24' }))),
+      F('Network to sweep in the Devices scan', txt(s.ipscan.cidr, v => save({ ipscan: { cidr: v } }), { placeholder: 'automatic, e.g. 192.168.1.0/24' }))),
     h('div', { class: 'card' }, h('h2', {}, 'Remote scanning probes (WLAN Pi or any Linux device)'),
       h('p', { class: 'dim' }, 'The probe is reached with the SSH client built into Windows, using key-based login (no passwords), and runs "iw dev <interface> scan". After saving, pick the probe in the scan-source list at the top right. See Help for the one-time setup.'),
       s.probes.map(probe),

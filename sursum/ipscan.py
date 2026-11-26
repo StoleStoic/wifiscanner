@@ -1,4 +1,4 @@
-"""LAN device discovery: ping sweep + ARP table, to spot unknown (rogue) clients."""
+"""Device discovery on your own network: ping sweep, ARP table, service probes and UPnP announcements."""
 
 from __future__ import annotations
 
@@ -71,15 +71,85 @@ def _name(ip: str) -> str:
         return ""
 
 
-DEMO = [("192.168.1.1", "3c:28:6d:a1:10:00", "router.lan"), ("192.168.1.20", "f4:5c:89:aa:10:21", "brians-laptop"),
-        ("192.168.1.23", "a4:83:e7:1c:5b:02", "iPhone"), ("192.168.1.31", "50:c7:bf:11:22:33", "kitchen-plug"),
-        ("192.168.1.44", "98:da:c4:5b:77:10", ""), ("192.168.1.57", "de:ad:4e:7f:01:9a", "")]
+PROBE_PORTS = [22, 80, 443, 445, 515, 548, 554, 631, 1883, 3389, 5000, 7000, 8009, 8080, 9100, 62078]
+
+
+def open_ports(ip: str) -> list[int]:
+    """Which well-known service ports answer. Used only as evidence of what kind of device it is."""
+    out = []
+
+    def one(port: int) -> None:
+        try:
+            with socket.create_connection((ip, port), timeout=0.6):
+                out.append(port)
+        except OSError:
+            pass
+
+    with ThreadPoolExecutor(len(PROBE_PORTS)) as ex:
+        list(ex.map(one, PROBE_PORTS))
+    return sorted(out)
+
+
+def ssdp(wait: float = 2.5) -> dict[str, str]:
+    """UPnP discovery: many TVs, speakers, consoles and routers describe themselves when asked."""
+    found: dict[str, str] = {}
+    msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n").encode()
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.settimeout(0.4)
+        s.sendto(msg, ("239.255.255.250", 1900))
+        end = time.time() + wait
+        while time.time() < end:
+            try:
+                data, (ip, _port) = s.recvfrom(2048)
+            except socket.timeout:
+                continue
+            m = re.search(r"^server:\s*(.+?)\s*$", data.decode("utf-8", "replace"), re.I | re.M)
+            if m and len(m.group(1)) > len(found.get(ip, "")):
+                found[ip] = m.group(1)[:120]
+    except OSError:
+        pass
+    finally:
+        s.close()
+    return found
+
+
+def local_mac(ip: str | None) -> str:
+    """MAC address of the adapter that holds our own IP (it is never in the ARP table)."""
+    if not ip:
+        return ""
+    if sys.platform == "win32":
+        blocks = re.split(r"\r?\n(?=\S)", _run(["ipconfig", "/all"]))
+    else:
+        blocks = re.split(r"\n(?=\d+: )", _run(["ip", "addr"]))
+    for b in blocks:
+        if re.search(rf"(?<![\d.]){re.escape(ip)}(?![\d.])", b):
+            m = _MAC.search(b)
+            if m:
+                return oui.norm(m.group(1))
+    return ""
+
+
+# ip, mac, hostname, open ports, access point it uses (simulated only)
+DEMO = [("192.168.1.1", "3c:28:6d:a1:10:00", "router.lan", [80, 443], None),
+        ("192.168.1.20", "00:12:f0:aa:10:21", "my-laptop", [445, 3389], "3c:28:6d:a1:10:02"),
+        ("192.168.1.23", "a4:83:e7:1c:5b:02", "iPhone", [62078], "3c:28:6d:a1:10:03"),
+        ("192.168.1.24", "f0:18:98:3c:77:d1", "Living-Room-TV", [7000], "3c:28:6d:a1:22:02"),
+        ("192.168.1.31", "50:c7:bf:11:22:33", "kitchen-plug", [80], "3e:28:6d:a1:10:01"),
+        ("192.168.1.35", "30:05:5c:9a:41:0e", "BRW30055C9A410E", [80, 631, 9100], "3c:28:6d:a1:22:01"),
+        ("192.168.1.40", "24:0a:c4:5e:19:f2", "esp-thermostat", [80], "3e:28:6d:a1:10:01"),
+        ("192.168.1.44", "98:da:c4:5b:77:10", "", [80], None),
+        ("192.168.1.57", "de:ad:4e:7f:01:9a", "", [], None),
+        ("192.168.1.58", "7a:11:c2:04:9b:33", "", [], "98:da:c4:5b:77:11")]
+# stations a monitor-mode capture would reveal on other people's access points
+DEMO_OTHERS = [("d4:f5:47:10:22:01", "a0:40:a0:5c:11:9e"), ("5c:e9:31:aa:07:14", "a0:40:a0:5c:11:9e"),
+               ("b8:27:eb:44:19:c0", "50:c7:bf:3e:8c:2a"), ("f6:02:8d:51:6e:aa", "80:cc:9c:42:d0:12"),
+               ("3a:9c:11:d0:44:02", "80:cc:9c:42:d0:11"), ("ac:bc:32:7f:20:99", "02:1a:11:f3:9c:40")]
 
 
 class IPScanner:
-    def __init__(self, store, demo):
-        self.store, self.demo = store, demo
-        self.devices: list[dict] = []
+    def __init__(self, store, demo, registry):
+        self.store, self.demo, self.registry = store, demo, registry
         self.running = False
         self.progress = 0.0
         self.error: str | None = None
@@ -94,12 +164,19 @@ class IPScanner:
         return True
 
     def _run(self) -> None:
+        reg = self.registry
         try:
             self.error, self.progress = None, 0.0
             if self.demo():
                 time.sleep(1.2)
                 self.network = "192.168.1.0/24 (simulated)"
-                self.devices = [self._dev(ip, mac, name, ip == "192.168.1.1", ip == "192.168.1.20") for ip, mac, name in DEMO]
+                for ip, mac, name, ports, ap in DEMO:
+                    reg.observe(mac, "lan", save=False, ip=ip, hostname=name, ports=ports, online=True,
+                                gateway=ip == "192.168.1.1", this_pc=ip == "192.168.1.20", ap=ap, ap_source="simulated")
+                for mac, ap in DEMO_OTHERS:
+                    reg.observe(mac, "capture", save=False, ap=ap, ap_source="simulated")
+                reg.mark_offline("lan", {d[1] for d in DEMO})
+                reg.save()
                 return
             me = local_ip()
             cidr = self.store.settings["ipscan"].get("cidr") or (f"{me}/24" if me else "")
@@ -121,31 +198,32 @@ class IPScanner:
                 if _ping(ip):
                     alive.add(ip)
                 done += 1
-                self.progress = done / len(hosts)
+                self.progress = 0.7 * done / len(hosts)
 
             with ThreadPoolExecutor(64) as ex:
                 list(ex.map(probe, hosts))
             arp = {ip: mac for ip, mac in arp_table().items() if ipaddress.ip_address(ip) in net}
             gw = gateway()
-            ips = sorted(set(arp) | alive, key=lambda i: tuple(int(x) for x in i.split(".")))
+            if me and (mine := local_mac(me)):
+                arp[me] = mine
+            ips = sorted(arp, key=lambda i: tuple(int(x) for x in i.split(".")))
+            upnp = ssdp()
+            self.progress = 0.8
             with ThreadPoolExecutor(32) as ex:
                 names = dict(zip(ips, ex.map(_name, ips)))
-            self.devices = [self._dev(ip, arp.get(ip, ""), names.get(ip, ""), ip == gw, ip == me) for ip in ips]
+                ports = dict(zip(ips, ex.map(open_ports, ips)))
+            for ip in ips:
+                reg.observe(arp[ip], "lan", save=False, ip=ip, hostname=names.get(ip, ""), ports=ports.get(ip),
+                            upnp=upnp.get(ip, ""), online=True, gateway=ip == gw, this_pc=ip == me)
+            reg.mark_offline("lan", set(arp.values()))
+            reg.save()
+        except Exception as e:  # never leave the UI stuck on "scanning"
+            self.error = f"Scan failed: {e}"
         finally:
             self.scanned_at = time.time()
             self.running = False
             self.progress = 1.0
 
-    def _dev(self, ip: str, mac: str, name: str, is_gw: bool, is_me: bool) -> dict:
-        known = {oui.norm(d["mac"]): d.get("label", "") for d in self.store.settings["inventory"]["devices"] if d.get("mac")}
-        return {"ip": ip, "mac": mac, "hostname": name, "vendor": oui.vendor(mac) if mac else "",
-                "random_mac": oui.is_local(mac) if mac else False, "gateway": is_gw, "self": is_me,
-                "known": mac in known or is_me, "label": known.get(mac, "This PC" if is_me else "")}
-
     def status(self) -> dict:
-        known = {oui.norm(d["mac"]): d.get("label", "") for d in self.store.settings["inventory"]["devices"] if d.get("mac")}
-        for d in self.devices:  # reflect inventory edits without a rescan
-            d["known"] = d["mac"] in known or d["self"]
-            d["label"] = known.get(d["mac"], "This PC" if d["self"] else "")
         return {"running": self.running, "progress": round(self.progress, 2), "error": self.error,
-                "scanned_at": self.scanned_at, "network": self.network, "devices": self.devices}
+                "scanned_at": self.scanned_at, "network": self.network}

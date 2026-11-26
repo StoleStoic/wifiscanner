@@ -1,10 +1,10 @@
 // Threat view: classification of every AP, radar map, inventory management and the BSSID locator.
-import { $, h, canvas, INK, SEV, download, pickFile, toast, color, sigClass, SIG } from './util.js';
+import { $, h, canvas, INK, SEV, AUTH, menu, download, pickFile, toast, color, sigClass, SIG } from './util.js';
 import { S, nets, th, hist, saveSettings, select } from './state.js';
 import { estimates } from './survey.js';
 
 let root, locate = null, audio = null, lastBeep = 0, beepOn = false, peak = -200;
-const CLS = { rogue: 'Rogue AP', unauthorized: 'Unauthorized AP', rogue_client: 'Rogue client', accidental: 'Accidental association',
+const CLS = { rogue: 'Rogue AP', unauthorized: 'Unauthorized AP', rogue_client: 'Unauthorized / unreviewed device', accidental: 'Accidental association',
   neighbor: 'Neighboring AP', authorized: 'Authorized (yours)', unclassified: 'Unclassified' };
 const CLS_SEV = { rogue: 'Critical', unauthorized: 'High', rogue_client: 'High', accidental: 'Medium', neighbor: 'Low', authorized: 'Info' };
 const inv = () => S.settings.inventory;
@@ -43,6 +43,12 @@ function drawRadar(cv) {
     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, py, big ? 7 : 4.5, 0, 7); ctx.fill();
     if (e) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.lineWidth = 1; }
     if (big || t.severity !== 'Low' && t.cls !== 'unclassified') { ctx.fillStyle = INK.text; ctx.fillText(t.ssid || '(hidden)', px + 9, py); }
+    // little dots: the devices known to use this access point
+    S.devices.filter(d => d.ap === t.bssid).slice(0, 14).forEach((d, i, arr) => {
+      const da = a + Math.PI + (i - (arr.length - 1) / 2) * 0.5, dx = px + 15 * Math.cos(da), dy = py + 15 * Math.sin(da);
+      ctx.fillStyle = d.sources.includes('lan') || d.authorized != null ? AUTH[d.authorized][1] : '#8892a6';
+      ctx.beginPath(); ctx.arc(dx, dy, 2.6, 0, 7); ctx.fill();
+    });
     hits.push({ px, py, b: t.bssid });
   }
   cv._hit = (mx, my) => hits.find(p => Math.hypot(p.px - mx, p.py - my) < 9)?.b;
@@ -100,6 +106,7 @@ export function mount(el, arg) {
 export const update = () => { if (root?.isConnected) { locator(); if ($('#radar')) drawRadar($('#radar')); } };
 export const onAnalysis = () => root?.isConnected && render();
 export const onSelect = () => root?.isConnected && render();
+export const onDevices = () => root?.isConnected && $('#radar') && drawRadar($('#radar'));
 
 function setup() {
   const groups = {};
@@ -130,16 +137,21 @@ function render() {
     !T.configured ? setup() : null,
     h('div', { class: 'kpis' }, ['rogue', 'unauthorized', 'rogue_client', 'accidental', 'neighbor', 'authorized'].map(kpi)),
     [...T.events, ...T.clients].map(e => h('div', { class: 'note', style: `border-color:${SEV[e.severity]}` },
-      h('div', { class: 't sev-' + e.severity }, `${e.severity}: ${e.label}`, e.ip ? ` — ${e.ip} (${e.mac}) ${e.vendor || ''} ${e.hostname || ''}` : ''),
-      h('div', {}, e.reasons.join(' ')), e.ip ? h('div', { class: 'dim' }, 'Review it in the IP Scanner tab; mark it as known there if it is yours.') : null)),
+      h('div', { class: 't sev-' + e.severity }, `${e.severity}: ${e.label}`, e.cls === 'rogue_client' ? ` — ${e.hostname || e.type || ''} ${e.ip || ''} (${e.mac}) ${e.vendor || ''}` : ''),
+      h('div', {}, e.reasons.join(' '), e.mac ? h('a', { href: '#', style: 'margin-left:8px', onclick: ev => { ev.preventDefault(); window.sursumGo('devices', { mac: e.mac }); } }, 'Open device') : null))),
     h('div', { class: 'grid2' },
       h('div', { class: 'card' }, h('h2', {}, 'Threat vector map'),
-        h('canvas', { id: 'radar', style: 'height:420px', onclick: e => { const r = e.target.getBoundingClientRect(), b = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); if (b) select(b); } }),
-        h('p', { class: 'dim' }, 'Distance from this PC is estimated from signal strength (walls can easily double or halve it). Direction is only real for dots with a white outline, which were located from a walk-through Survey; a single WiFi adapter cannot sense direction, so other dots are placed at an arbitrary angle. Use Locate to find a device.')),
+        h('canvas', { id: 'radar', style: 'height:420px', oncontextmenu: e => {
+          e.preventDefault(); const r = e.target.getBoundingClientRect(), b = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); if (!b) return;
+          const n = S.devices.filter(d => d.ap === b).length;
+          menu(e.clientX, e.clientY, [[`Show devices (${n})`, () => window.sursumGo('map', { ap: b })], ['Locate this access point', () => { locate = b; peak = -200; select(b); locator(); $('#main').scrollTop = 0; }], null,
+            ['Mark as mine', () => mark([b], 'auth')], ['Mark as neighbor', () => mark([b], 'neighbor')], ['Show in Scan', () => { select(b); window.sursumGo('scan'); }]]);
+        }, onclick: e => { const r = e.target.getBoundingClientRect(), b = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); if (b) select(b); } }),
+        h('p', { class: 'dim' }, 'Small dots next to an access point are the devices known to use it; right-click an access point and choose Show devices to see them on the Map. Distance from this PC is estimated from signal strength (walls can easily double or halve it). Direction is only real for dots with a white outline, which were located from a walk-through Survey; a single WiFi adapter cannot sense direction, so other dots are placed at an arbitrary angle. Use Locate to find a device.')),
       h('div', { class: 'card' }, h('h2', {}, 'How access points are classified'),
         [['Critical', 'Rogue access point', 'Uses your network name from an unknown radio (evil twin), or its address matches a device on your own LAN.'],
           ['High', 'Unauthorized access point', 'Unknown AP estimated inside your home perimeter. Becomes rogue if tied to your network.'],
-          ['High', 'Rogue client', 'Unknown device found on your network by the IP Scanner.'],
+          ['High', 'Rogue client', 'A device on your network that you marked as not authorized (Medium while still unreviewed).'],
           ['Medium', 'Accidental association', 'This PC is connected to an AP that is not on your authorized list.'],
           ['Low', 'Neighboring access point', 'Outside your perimeter, or marked by you as a known neighbor.']].map(([s, t, d]) =>
           h('p', {}, h('b', { class: 'sev-' + s }, `${s} · ${t}. `), h('span', { class: 'dim' }, d))),

@@ -6,7 +6,8 @@ import * as speed from './speed.js';
 import * as survey from './survey.js';
 import * as threats from './threats.js';
 import * as analysis from './analysis.js';
-import * as ipscan from './ipscan.js';
+import * as devices from './devices.js';
+import * as netmap from './map.js';
 import * as sessions from './sessions.js';
 import * as settings from './settings.js';
 import * as help from './help.js';
@@ -14,7 +15,8 @@ import * as help from './help.js';
 const TABS = [
   ['scan', 'Scan', scan], ['spectrum', 'Spectrum', charts.spectrum], ['signal', 'Signal', charts.signal],
   ['threats', 'Threats', threats], ['analysis', 'Analysis', analysis], ['speed', 'Speed Test', speed],
-  ['survey', 'Survey', survey], ['ipscan', 'IP Scanner', ipscan], ['sessions', 'Sessions', sessions],
+  ['devices', 'Devices', devices], ['map', 'Map', netmap],
+  ['survey', 'Survey', survey], ['sessions', 'Sessions', sessions],
   ['settings', 'Settings', settings], ['help', 'Help', help],
 ];
 let current = null;
@@ -34,10 +36,12 @@ window.sursumGo = go;
 function renderTabs() {
   const c = S.threats?.counts || {};
   const alerts = (c.rogue || 0) + (c.accidental || 0) + (c.rogue_client || 0);
+  const pendingDev = S.devices.filter(d => d.authorized == null && d.sources.includes('lan')).length;
   const hi = S.notes.filter(n => n.priority === 'Very High' || n.priority === 'High').length;
   $('#tabs').replaceChildren(...TABS.map(([id, label]) => h('button', { class: S.tab === id ? 'on' : '', onclick: () => go(id) }, label,
     id === 'threats' && alerts ? h('span', { class: 'badge bad' }, alerts) : null,
-    id === 'analysis' && hi ? h('span', { class: 'badge poor' }, hi) : null)));
+    id === 'analysis' && hi ? h('span', { class: 'badge poor' }, hi) : null,
+    id === 'devices' && pendingDev ? h('span', { class: 'badge fair' }, pendingDev) : null)));
 }
 
 function renderStatus() {
@@ -73,6 +77,7 @@ on('analysis', renderTabs);
 on('data', () => current?.update?.());
 on('analysis', () => current?.onAnalysis?.());
 on('select', b => current?.onSelect?.(b));
+on('devices', () => { current?.onDevices?.(); renderTabs(); });
 window.addEventListener('resize', () => current?.update?.());
 
 init().then(() => go('scan')).catch(e => { toast('Could not reach the scanner backend: ' + e.message, true); });

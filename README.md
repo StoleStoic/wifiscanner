@@ -26,7 +26,7 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 1. **Scan** tab: every access point in range, one row per radio.
 2. **Threats** tab: click your own network name. From then on everything else is sorted
    into rogue, unauthorized or neighboring.
-3. **IP Scanner** tab: scan, and mark the devices you recognise as known.
+3. **Devices** tab: click *Scan my network*, then name each device and mark it authorized or not.
 4. **Analysis** tab: read from the top; it lists what to fix first.
 
 ## What it does
@@ -40,7 +40,8 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 | Analysis | Prioritised notes (Very High to Very Low) on security, connectivity, performance and configuration, each linked to a help article. Optional deeper review by Claude. |
 | Speed Test | Single, repeating, or automatic on roaming, with a choice of servers and a room label on each result. |
 | Survey | Click-where-you-stand survey on a floor plan image, passive or active, with heatmaps per SSID or BSSID, adjustable colour range, speed tests at points, and estimated access point positions. |
-| IP Scanner | Devices on your own network, with unknown ones flagged. |
+| Devices | Every device seen by any scan, merged into one list: type, maker, addresses, services, the access point it uses, first and last seen. Authorize, name and categorize each one (or many at once); optional identification by Claude. |
+| Map | All access points and devices and what is connected to what. Right-click for options. |
 | Sessions | Save, reopen, import, download and compare scans; open pcap / pcapng captures. |
 | Settings, Help | Scan timing, home perimeter, remote probes, Claude key; filter syntax and articles. |
 
@@ -70,7 +71,10 @@ Example: `5ghz & wpa3 ^ wpa2 , rssi>-60 & !neighbor`. The Help tab has the full 
   matches a device seen on your LAN; "evil twin" means your network name on an unknown radio.
   Confirm by locating the device.
 - **It detects access points, not other people's client devices.** Devices on your own network
-  are found by the IP Scanner.
+  are found by the network scan in the Devices tab.
+- **Which device uses which access point is mostly not observable from Windows.** The link is known for this PC,
+  for devices seen in a monitor-mode capture file, and where you set it yourself. Other devices are shown on
+  "My network" with the access point unknown.
 - Windows updates signal readings every few seconds, so the locator moves in steps.
 
 ## Privacy and safety

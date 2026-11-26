@@ -114,15 +114,26 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
                        "bssid": conn["bssid"], "ssid": conn.get("ssid"),
                        "reasons": [f"This PC is connected to '{conn.get('ssid')}' ({conn['bssid']}), "
                                    "which is not one of your authorized access points."]})
+    names = {n["bssid"]: n["ssid"] for n in nets}
+    for d in lan:  # one of your devices is using an access point that is not yours
+        if d.get("known") and d.get("ap") and ctx["configured"] and d["ap"] not in auth and not d.get("self"):
+            events.append({"cls": "accidental", "severity": "Medium", "label": "Accidental association",
+                           "bssid": d["ap"], "ssid": names.get(d["ap"]), "mac": d["mac"],
+                           "reasons": [f"Your device {d.get('name') or d.get('hostname') or d['mac']} is connected to "
+                                       f"'{names.get(d['ap']) or d['ap']}', which is not one of your authorized access points."]})
     clients = []
     for d in lan:
         if d.get("known") or d.get("gateway") or not d.get("mac"):
             continue
         if oui.norm(d["mac"]) in auth or any(_near(a, d["mac"]) for a in auth):
             continue  # an authorized AP's own LAN interface
-        clients.append({"cls": "rogue_client", "severity": "High", "label": "Unknown device on your network",
-                        "ip": d["ip"], "mac": d["mac"], "vendor": d.get("vendor"), "hostname": d.get("hostname"),
-                        "reasons": ["Connected to your network but not in your known-devices list."
+        denied = d.get("authorized") is False
+        clients.append({"cls": "rogue_client", "severity": "High" if denied else "Medium",
+                        "label": "Unauthorized device on your network" if denied else "Unreviewed device on your network",
+                        "ip": d.get("ip"), "mac": d["mac"], "vendor": d.get("vendor"), "hostname": d.get("hostname"),
+                        "type": d.get("type"), "ap": d.get("ap"),
+                        "reasons": [("You marked this device as not authorized, and it is on your network now."
+                                     if denied else "On your network, but you have not yet said whether it is yours.")
                                     + (" Uses a randomised (private) MAC address." if d.get("random_mac") else "")]})
     items.sort(key=lambda i: (SEVERITY[i["severity"]], -i["rssi"]))
     counts: dict[str, int] = {}
@@ -173,10 +184,17 @@ def notes(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict]) 
         add("Security", "High", "This PC is connected to a non-authorized access point", " ".join(e["reasons"]) +
             " Disconnect and remove that network from Windows' saved networks if you did not intend this.",
             "accidental-association", e["bssid"])
-    for c in th["clients"]:
-        add("Security", "High", f"Unknown device on your network: {c['ip']}",
-            f"{c['mac']} {c.get('vendor') or ''} {c.get('hostname') or ''}. ".replace("  ", " ") + c["reasons"][0] +
-            " If you recognise it, add it to known devices; otherwise change your WiFi password.", "rogue-client")
+    denied = [c for c in th["clients"] if c["severity"] == "High"]
+    for c in denied:
+        add("Security", "High", f"Unauthorized device on your network: {c.get('hostname') or c['mac']}",
+            f"{c['mac']} {c.get('vendor') or ''} at {c.get('ip') or 'unknown address'}. ".replace("  ", " ") + c["reasons"][0] +
+            " Change your WiFi password to remove it; every device must then rejoin.", "rogue-client")
+    pending = [c for c in th["clients"] if c["severity"] != "High"]
+    if pending:
+        add("Security", "Medium", f"{len(pending)} device(s) on your network have not been reviewed",
+            "Open the Devices tab and mark each one as authorized or not authorized: "
+            + ", ".join(c.get("hostname") or c["mac"] for c in pending[:8]) + ("…" if len(pending) > 8 else "") + ".",
+            "rogue-client")
     for n in mine:
         if n["security"] == "Open":
             add("Security", "Very High", f"Your network is open: {n['ssid']}",

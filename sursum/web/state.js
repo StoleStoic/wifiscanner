@@ -10,6 +10,7 @@ export const S = {
   selected: null,       // bssid
   filterText: '', filter: () => true, filterError: null,
   threats: null, notes: [], ai: {}, aiRunning: false,
+  devices: [], devStatus: {}, deviceTypes: [],
   tab: 'scan',
 };
 const subs = {};
@@ -38,6 +39,16 @@ export async function saveSettings(patch) {
   await refreshAnalysis();
 }
 
+export async function refreshDevices(res) {
+  const d = res || await api('/api/devices');
+  S.devices = d.devices; S.deviceTypes = d.types; S.devStatus = d;
+  emit('devices');
+}
+export async function deviceAction(action, macs, patch) {
+  await refreshDevices(await api('/api/devices', { action, macs, patch }));
+  await refreshAnalysis();
+}
+
 export async function refreshAnalysis() {
   const a = S.loaded ? await api('/api/analysis', { networks: S.loaded.networks.map(({ ies, ie_hex, ...n }) => n) }) : await api('/api/analysis');
   S.threats = a.threats; S.notes = a.notes; S.ai = a.ai || {}; S.aiRunning = a.ai_running;
@@ -62,7 +73,7 @@ export async function poll() {
     S.offline = false;
     if (!S.loaded) emit('data');
     emit('status');
-    if (tick++ % 3 === 0 && !S.loaded) refreshAnalysis();
+    if (tick++ % 3 === 0 && !S.loaded) { refreshAnalysis(); refreshDevices(); }
   } catch (e) { S.offline = true; emit('status'); }
 }
 
@@ -71,6 +82,7 @@ export async function init() {
   const hd = await api('/api/history');
   S.history = hd.history || {};
   await poll();
+  await refreshDevices();
   await refreshAnalysis();
   setInterval(poll, 2000);
 }

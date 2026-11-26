@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import __version__, ai, analysis
 from .engine import Engine, interference
+from .devices import TYPES, Registry
 from .ipscan import IPScanner
 from .scanners import ScanError, pcap
 from .speedtest import SpeedTester
@@ -26,7 +27,10 @@ class App:
         self.store = store or Store()
         self.speed = SpeedTester(self.store, lambda: self.engine.connection, lambda: self.engine.source == "demo")
         self.engine = Engine(self.store, on_roam=self.speed.on_roam)
-        self.ipscan = IPScanner(self.store, lambda: self.engine.source == "demo")
+        self.registry = Registry(self.store)
+        self.ipscan = IPScanner(self.store, lambda: self.engine.source == "demo", self.registry)
+        self.identify: dict = {}
+        self.identify_running = False
         self.ai_result: dict = {}
         self.ai_running = False
         self.engine.start(source)
@@ -51,8 +55,8 @@ class App:
             return self.speed.status()
         if path == "/api/speedtest/servers":
             return self.speed.server_list(refresh=bool(q.get("refresh")))
-        if path == "/api/ipscan":
-            return self.ipscan.status()
+        if path in ("/api/ipscan", "/api/devices"):
+            return self.devices()
         if path == "/api/analysis":
             return self.analysis()
         if path == "/api/surveys":
@@ -61,14 +65,43 @@ class App:
 
     def analysis(self, nets: list[dict] | None = None) -> dict:
         nets = self.engine.snapshot() if nets is None else nets
-        s, conn, lan = self.store.settings, self.engine.connection, self.ipscan.devices
+        s, conn, lan = self.store.settings, self.engine.connection, self.registry.lan()
         return {"threats": analysis.classify(nets, conn, s, lan), "notes": analysis.notes(nets, conn, s, lan),
                 "ai": self.ai_result, "ai_running": self.ai_running}
+
+    def devices(self) -> dict:
+        """Registry plus live facts: this PC's own link and the name of each device's access point."""
+        conn, reg = self.engine.connection, self.registry
+        mine = next((d for d in reg.list() if d["self"]), None)
+        if mine and conn and conn.get("bssid") and (mine["ap"], mine["ap_source"]) != (conn["bssid"], "this PC"):
+            reg.observe(mine["mac"], "lan", ap=conn["bssid"], ap_source="this PC", online=True)
+        names = {n["bssid"]: n for n in self.engine.snapshot()}
+        out = []
+        for d in reg.list():
+            ap = names.get(d["ap"] or "")
+            d["ap_name"] = (ap["ssid"] or "(hidden)") if ap else None
+            d["ap_band"] = f"{ap['band']} GHz ch {ap['channel']}" if ap else None
+            out.append(d)
+        return dict(self.ipscan.status(), devices=out, types=TYPES, identify=self.identify,
+                    identify_running=self.identify_running)
+
+    def _identify(self, macs: list[str]) -> None:
+        try:
+            s = self.store.settings
+            devs = [d for d in self.devices()["devices"] if d["mac"] in macs]
+            res = ai.identify_devices(devs, s["ai"].get("api_key", ""), s["ai"].get("model") or "claude-opus-5-5")
+            if "devices" in res:
+                res = {"updated": self.registry.apply_ai(res["devices"]), "asked": len(devs)}
+            self.identify = dict(res, t=time.time())
+        except Exception as ex:
+            self.identify = {"error": f"Identification failed: {ex}", "t": time.time()}
+        finally:
+            self.identify_running = False
 
     def _ai(self) -> None:
         try:
             nets = self.engine.snapshot()
-            s, conn, lan = self.store.settings, self.engine.connection, self.ipscan.devices
+            s, conn, lan = self.store.settings, self.engine.connection, self.registry.lan()
             snap = ai.build_snapshot(nets, conn, analysis.classify(nets, conn, s, lan),
                                      analysis.notes(nets, conn, s, lan), lan)
             self.ai_result = dict(ai.analyze(snap, s["ai"].get("api_key", ""), s["ai"].get("model") or "claude-opus-5-5"),
@@ -86,6 +119,10 @@ class App:
             except ScanError as ex:
                 return {"error": str(ex)}
             interference(nets)
+            for st in stats["stations"]:  # remember which device talked to which access point
+                self.registry.observe(st["mac"], "capture", save=False, ap=st["bssid"], ap_source="capture",
+                                      rssi=st["rssi"], frames=st["frames"], seen=st["seen"] or None)
+            self.registry.save()
             return {"networks": nets, "stats": stats}
         data = json.loads(body or b"{}")
         if path == "/api/scan":
@@ -132,6 +169,16 @@ class App:
         if path == "/api/ipscan":
             self.ipscan.start()
             return self.ipscan.status()
+        if path == "/api/devices":
+            act, macs = data.get("action"), list(data.get("macs") or [])
+            if act == "update":
+                self.registry.update(macs, data.get("patch") or {})
+            elif act == "forget":
+                self.registry.forget(macs)
+            elif act == "identify" and not self.identify_running:
+                self.identify_running = True
+                threading.Thread(target=self._identify, args=(macs,), daemon=True, name="identify").start()
+            return self.devices()
         if path == "/api/analysis/ai":
             if not self.ai_running:
                 self.ai_running = True

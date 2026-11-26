@@ -85,7 +85,8 @@ def _frames(data: bytes):
 
 def read(data: bytes) -> tuple[list[dict], dict]:
     nets: dict[str, dict] = {}
-    stats = {"packets": 0, "beacons": 0, "unsupported": 0}
+    stations: dict[tuple[str, str], dict] = {}
+    stats = {"packets": 0, "beacons": 0, "unsupported": 0, "stations": []}
     for link, ts, pkt in _frames(data):
         stats["packets"] += 1
         if link == LINK_RADIOTAP:
@@ -94,6 +95,17 @@ def read(data: bytes) -> tuple[list[dict], dict]:
             frame, info = pkt, {}
         else:
             stats["unsupported"] += 1
+            continue
+        if len(frame) >= 24 and frame[0] & 0x0C == 0x08:  # data frame: reveals station <-> access point
+            ds = frame[1] & 3
+            pair = (frame[10:16], frame[4:10]) if ds == 1 else (frame[4:10], frame[10:16]) if ds == 2 else None
+            if pair and not pair[0][0] & 1 and not pair[1][0] & 1:  # (station, bssid), no multicast
+                key = (pair[0].hex(":"), pair[1].hex(":"))
+                st = stations.setdefault(key, {"mac": key[0], "bssid": key[1], "frames": 0, "rssi": None, "seen": ts})
+                st["frames"] += 1
+                st["seen"] = ts or st["seen"]
+                if ds == 1 and "rssi" in info:
+                    st["rssi"] = info["rssi"]
             continue
         if len(frame) < 36 or frame[0] not in (0x80, 0x50):  # beacon / probe response
             continue
@@ -121,8 +133,14 @@ def read(data: bytes) -> tuple[list[dict], dict]:
             if "rssi" not in info:
                 n["rssi"] = old["rssi"]
         nets[bssid] = n
-    if stats["packets"] and not stats["beacons"]:
+    if stats["packets"] and not nets:
         if stats["unsupported"] == stats["packets"]:
             raise ScanError("This capture is not an 802.11 monitor-mode capture (no radiotap / 802.11 frames).")
         raise ScanError("No beacons or probe responses found in this capture.")
+    # keep each station's busiest pairing with an access point that the capture also heard beaconing
+    best: dict[str, dict] = {}
+    for st in stations.values():
+        if st["bssid"] in nets and st["frames"] > best.get(st["mac"], {"frames": 0})["frames"]:
+            best[st["mac"]] = st
+    stats["stations"] = list(best.values())
     return list(nets.values()), stats

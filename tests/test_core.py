@@ -221,3 +221,76 @@ class Storage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Devices(unittest.TestCase):
+    def setUp(self):
+        from sursum.devices import Registry
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.dir.name))
+        self.reg = Registry(self.store)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_type_rules(self):
+        from sursum.devices import guess_type
+        cases = [(dict(hostname="BRW30055C9A410E", vendor="Brother Industries", ports=[80, 631, 9100]), "Printer"),
+                 (dict(hostname="iPhone", vendor="Apple, Inc.", ports=[62078]), "Phone / tablet"),
+                 (dict(hostname="Living-Room-TV", vendor="Apple, Inc.", ports=[7000]), "TV / streaming"),
+                 (dict(hostname="kitchen-plug", vendor="TP-LINK TECHNOLOGIES CO.,LTD."), "Smart home"),
+                 (dict(hostname="", vendor="Espressif Inc."), "Smart home"),
+                 (dict(hostname="DESKTOP-4F2K", vendor="Intel Corporate", ports=[445, 3389]), "Computer"),
+                 (dict(hostname="", vendor="NETGEAR"), "Network equipment"),
+                 (dict(hostname="", vendor="", random_mac=True), "Unknown")]
+        for d, want in cases:
+            self.assertEqual(guess_type(d)[0], want, d)
+
+    def test_merge_authorize_and_persist(self):
+        from sursum.devices import Registry
+        r = self.reg
+        r.observe("A4-83-E7-1C-5B-02", "lan", ip="192.168.1.23", hostname="iPhone", ports=[62078], online=True)
+        r.observe("a4:83:e7:1c:5b:02", "capture", ap="3C:28:6D:A1:10:03", ap_source="capture")
+        d = r.list()[0]
+        self.assertEqual((len(r.list()), d["type"], d["ap"], d["sources"], d["authorized"]),
+                         (1, "Phone / tablet", "3c:28:6d:a1:10:03", ["lan", "capture"], None))
+        r.update([d["mac"]], {"authorized": False, "name": "Stranger", "type": "Camera", "ap": "aa:bb:cc:dd:ee:ff"})
+        r.observe(d["mac"], "capture", ap="11:22:33:44:55:66")  # a scan must not override what the user set
+        d = Registry(self.store).list()[0]
+        self.assertEqual((d["authorized"], d["name"], d["type"], d["ap"], d["ap_source"]),
+                         (False, "Stranger", "Camera", "aa:bb:cc:dd:ee:ff", "manual"))
+        r.observe("3c:28:6d:a1:10:00", "lan", ip="192.168.1.1", gateway=True, online=True)
+        r.observe("00:12:f0:aa:10:21", "lan", ip="192.168.1.20", this_pc=True, online=True)
+        by = {x["mac"]: x for x in r.lan()}
+        self.assertTrue(by["3c:28:6d:a1:10:00"]["known"] and by["00:12:f0:aa:10:21"]["known"])
+        self.assertFalse(by["a4:83:e7:1c:5b:02"]["known"])
+        self.assertEqual(r.apply_ai([{"mac": "a4:83:e7:1c:5b:02", "type": "Speaker", "confidence": "high", "reason": "x", "likely_model": ""}]), 0)
+
+    def test_threat_levels_follow_authorization(self):
+        r = self.reg
+        r.observe("de:ad:4e:7f:01:9a", "lan", ip="192.168.1.57", online=True)
+        r.observe("a4:83:e7:1c:5b:02", "lan", ip="192.168.1.23", online=True, ap="e6:f0:42:1d:77:b1")
+        r.update(["de:ad:4e:7f:01:9a"], {"authorized": False})
+        s = simulated.SimulatedScanner()
+        nets, conn = s.scan()
+        settings = _merge(DEFAULTS, {})
+        settings["inventory"]["aps"] = [{"bssid": n["bssid"]} for n in nets if n["ssid"] == simulated.HOME]
+        t = analysis.classify(nets, conn, settings, r.lan())
+        self.assertEqual({c["mac"]: c["severity"] for c in t["clients"]}, {"de:ad:4e:7f:01:9a": "High", "a4:83:e7:1c:5b:02": "Medium"})
+        r.update(["a4:83:e7:1c:5b:02"], {"authorized": True})  # my phone, but on the neighbour's AP
+        t = analysis.classify(nets, conn, settings, r.lan())
+        self.assertEqual([e["cls"] for e in t["events"]], ["accidental"])
+
+    def test_capture_reveals_station_links(self):
+        cap = Captures()._pcap()
+        ap = bytes.fromhex("3c286da11002")
+        sta = bytes.fromhex("a483e71c5b02")
+        for _ in range(3):  # data frames from the station to the AP (ToDS)
+            frame = b"\x08\x01\x00\x00" + ap + sta + ap + b"\x00\x00" + bytes(20)
+            rt = struct.pack("<BBHI", 0, 0, 16, (1 << 1) | (1 << 3) | (1 << 5)) + struct.pack("<BxHHb", 0, 5220, 0, -61) + b"\x00"
+            cap += struct.pack("<IIII", 2000, 0, len(rt + frame), len(rt + frame)) + rt + frame
+        bogus = b"\x08\x01\x00\x00" + bytes.fromhex("001122334455") + sta + bytes(8) + bytes(20)  # AP never beaconed
+        cap += struct.pack("<IIII", 2001, 0, len(bogus), len(bogus)) + bogus
+        _, stats = pcap.read(cap)
+        self.assertEqual([(s["mac"], s["bssid"], s["frames"], s["rssi"]) for s in stats["stations"]],
+                         [("a4:83:e7:1c:5b:02", "3c:28:6d:a1:10:02", 3, -61)])

@@ -88,3 +88,13 @@ export function pickFile(accept) {
 export const sel = (opts, value, onchange, attrs = {}) =>
   h('select', { ...attrs, onchange: e => onchange(e.target.value) },
     opts.map(o => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: String(v) === String(value) }, l); }));
+
+// Context menu at a screen position. items: [label, handler] pairs, or null for a separator.
+export function menu(x, y, items) {
+  $$('.ctx').forEach(m => m.remove());
+  const m = h('div', { class: 'ctx' }, items.map(it => (it ? h('button', { onclick: () => { m.remove(); it[1](); } }, it[0]) : h('hr'))));
+  document.body.append(m);
+  m.style.left = Math.min(x, innerWidth - m.offsetWidth - 8) + 'px'; m.style.top = Math.min(y, innerHeight - m.offsetHeight - 8) + 'px';
+  setTimeout(() => document.addEventListener('pointerdown', function f(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('pointerdown', f); } }), 0);
+}
+export const AUTH = { true: ['Authorized', '#3ecf8e'], false: ['Not authorized', '#ef5b5b'], null: ['Unreviewed', '#f0913a'] };
