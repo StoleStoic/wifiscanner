@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sursum-wifi-scanner"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stole Sursum WiFi Scanner: personal WiFi scanning, analysis and threat detection for Windows 11"
 requires-python = ">=3.10"
 dependencies = []

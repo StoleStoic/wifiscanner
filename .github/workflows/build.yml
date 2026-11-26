@@ -1,4 +1,4 @@
-name: Test and build
+name: Test, build installer and release
 
 on:
   push:
@@ -21,28 +21,59 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
-  windows-exe:
+  windows-installer:
     needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write   # to publish the installer as a release
+    env:
+      APP_VERSION: 0.2.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build standalone program
+      - name: Stamp version
+        shell: pwsh
+        run: (Get-Content sursum/__init__.py) -replace '__version__ = ".*"', "__version__ = `"$env:APP_VERSION`"" | Set-Content sursum/__init__.py
+      - name: Build program
         run: |
-          python -m pip install pyinstaller anthropic
-          pyinstaller --noconfirm --onefile --name SursumWiFiScanner --add-data "sursum/web;sursum/web" --add-data "sursum/data;sursum/data" run_sursum.py
-      - name: Smoke test (demo mode)
+          python -m pip install pyinstaller pywebview anthropic
+          pyinstaller --noconfirm --windowed --name SursumWiFiScanner --icon packaging/sursum.ico --add-data "sursum/web;sursum/web" --add-data "sursum/data;sursum/data" run_sursum.py
+      - name: Build Setup.exe
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\SursumWiFiScanner.exe -ArgumentList "--demo","--no-browser","--port","8737" -PassThru
-          Start-Sleep -Seconds 12
-          $s = Invoke-RestMethod http://127.0.0.1:8737/api/state
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$env:APP_VERSION" packaging\installer.iss
+          if ($LASTEXITCODE) { throw "installer build failed" }
+      - name: Install it and run it (demo mode)
+        shell: pwsh
+        run: |
+          $setup = Start-Process dist\SursumWiFiScanner-Setup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=desktopicon" -Wait -PassThru
+          if ($setup.ExitCode) { throw "setup exit code $($setup.ExitCode)" }
+          $exe = "$env:LOCALAPPDATA\Programs\Stole Sursum WiFi Scanner\SursumWiFiScanner.exe"
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Stole Sursum WiFi Scanner.lnk"
+          foreach ($f in $exe, $menu, "$env:USERPROFILE\Desktop\Stole Sursum WiFi Scanner.lnk") { if (-not (Test-Path $f)) { throw "missing after install: $f" } }
+          $p = Start-Process $exe -ArgumentList "--demo" -PassThru
+          Start-Sleep -Seconds 20
+          try { $s = Invoke-RestMethod http://127.0.0.1:8737/api/state } finally { Get-Content "$env:APPDATA\StoleSursum\app.log" -ErrorAction SilentlyContinue }
+          $title = (Get-Process -Id $p.Id).MainWindowTitle
+          "Window title: '$title'; version $($s.version); $($s.networks.Count) networks"
           Stop-Process -Id $p.Id -Force
           if ($s.networks.Count -lt 10) { throw "demo scan returned $($s.networks.Count) networks" }
-          "Demo scan returned $($s.networks.Count) networks"
+          if (-not (Select-String -Path "$env:APPDATA\StoleSursum\app.log" -Pattern "window: native" -Quiet)) { throw "the app did not open its own window" }
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Stole Sursum WiFi Scanner\unins*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList "/VERYSILENT","/NORESTART" -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "uninstall left the program behind" }
+          "Uninstall removed the program."
       - uses: actions/upload-artifact@v4
         with:
-          name: SursumWiFiScanner-windows
-          path: dist/SursumWiFiScanner.exe
+          name: SursumWiFiScanner-Setup
+          path: dist/SursumWiFiScanner-Setup.exe
+      - name: Publish release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ env.APP_VERSION }}" dist/SursumWiFiScanner-Setup.exe --target "${{ github.sha }}" --title "Stole Sursum WiFi Scanner ${{ env.APP_VERSION }}" --notes "Download SursumWiFiScanner-Setup.exe below and run it. Windows may show 'Windows protected your PC' because the installer is not code-signed: choose More info, then Run anyway." --latest

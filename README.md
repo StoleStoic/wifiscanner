@@ -3,20 +3,18 @@
 A personal WiFi scanner, analyser, troubleshooter and threat detector for Windows 11.
 It runs entirely on your own PC and shows its screens in your web browser.
 
-## Start it
+## Install
 
-1. Install **Python 3.12 or newer** once, from the Microsoft Store (search "Python") or
-   <https://www.python.org/downloads/>.
-2. Download this repository (green **Code** button > **Download ZIP**) and unzip it.
-3. Double-click **`Start Sursum WiFi Scanner.bat`**. A black window opens and your browser
-   shows the scanner. Keep the black window open while you use it; close it to quit.
+1. Open the [latest release](https://github.com/StoleStoic/wifiscanner/releases/latest) and download
+   **`SursumWiFiScanner-Setup.exe`**.
+2. Run it. Windows may show "Windows protected your PC" because the installer is not code-signed:
+   choose **More info**, then **Run anyway**.
+3. Start **Stole Sursum WiFi Scanner** from the Start menu or the desktop shortcut. It opens in its
+   own window; closing the window quits it.
 
-To look around without a WiFi adapter, double-click **`Start Demo Mode.bat`**: it shows a
-simulated neighbourhood that includes an evil twin and a rogue access point.
-
-Every push to GitHub also builds a single-file `SursumWiFiScanner.exe` that needs no
-Python: open the repository's **Actions** tab, pick the latest run, and download the
-`SursumWiFiScanner-windows` artifact.
+Nothing else needs installing. To remove it, use Windows Settings > Apps > Installed apps.
+The Start menu also has **Stole Sursum WiFi Scanner (Demo mode)**, which shows a simulated
+neighbourhood that includes an evil twin and a rogue access point.
 
 **Windows must allow location access**, or it blocks WiFi scanning: Settings > Privacy &
 security > Location, switch on *Location services* and *Let desktop apps access your location*.
@@ -55,7 +53,7 @@ Example: `5ghz & wpa3 ^ wpa2 , rssi>-60 & !neighbor`. The Help tab has the full 
 
 ### Optional extras
 
-- **Claude analysis**: `py -m pip install anthropic`, then enter an Anthropic API key in Settings.
+- **Claude analysis and device identification**: enter an Anthropic API key in Settings.
   Only a summary of the current scan is sent, and only when you press the button.
 - **Remote scanning** with a WLAN Pi or any Linux device over SSH: see Help > Remote scanning.
 
@@ -87,12 +85,15 @@ other networks.
 ## For developers
 
 ```bash
-python -m sursum --demo          # run with the simulated environment
+python -m sursum --demo          # console mode, UI in the browser
 ```
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-Pure Python standard library; `sursum/scanners/windows.py` calls the Windows Native WiFi API
-(`wlanapi.dll`) through `ctypes`. The UI in `sursum/web` is plain JavaScript modules with no build step.
+The backend is pure Python standard library; `sursum/scanners/windows.py` calls the Windows Native
+WiFi API (`wlanapi.dll`) through `ctypes`. The UI in `sursum/web` is plain JavaScript modules with no
+build step. The installed program (`sursum/app.py`) shows that UI in an Edge WebView2 window via
+`pywebview`, is frozen with PyInstaller and packaged with Inno Setup (`packaging/installer.iss`);
+`.github/workflows/build.yml` builds, installs, runs and uninstalls it on Windows, then publishes the release.
