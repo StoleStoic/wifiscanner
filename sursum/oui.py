@@ -51,5 +51,5 @@ def vendor(mac: str) -> str:
     if is_local(mac):
         first = int(m[:2], 16) & ~0x02
         hit = db.get(f"{first:02X}{m[2:6]}")
-        return f"{hit} (virtual)" if hit else "Private / randomised"
+        return f"Private (possibly {hit})" if hit else "Private / randomised"
     return ""
