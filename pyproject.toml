@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sursum-wifi-scanner"
+version = "0.1.0"
+description = "Stole Sursum WiFi Scanner: personal WiFi scanning, analysis and threat detection for Windows 11"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+ai = ["anthropic>=1.0"]
+
+[project.scripts]
+sursum = "sursum.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["sursum*"]
+
+[tool.setuptools.package-data]
+sursum = ["web/*", "data/*"]

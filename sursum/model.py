@@ -41,10 +41,3 @@ def build(bssid: str, rssi: float, freq_mhz: int, raw_ies: bytes, *, capability:
         n["ie_hex"] = raw_ies.hex()
     return n
 
-
-COLUMNS = ["ssid", "bssid", "vendor", "ap_name", "rssi", "noise", "snr", "quality", "band",
-           "channel", "width", "center_channel", "freq", "center_freq", "secondary", "generation",
-           "standards", "security", "akm", "ciphers", "pmf", "wps", "stations", "utilization",
-           "uptime", "max_rate", "streams", "basic_rates", "rates", "beacon_interval", "dtim",
-           "country", "tx_power", "bss_color", "k", "v", "r", "wmm", "mu_mimo", "beamforming",
-           "twt", "mlo", "hotspot2", "protection", "mode", "model", "first_seen", "last_seen", "seen"]

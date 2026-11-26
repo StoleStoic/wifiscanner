@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import time
+import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
 UA = {"User-Agent": "sursum-wifi-scanner"}
 CLOUDFLARE = {"id": "cloudflare", "name": "Cloudflare (nearest location, automatic)",
-              "dl": "https://speed.cloudflare.com/__down?bytes=100000000",
+              "dl": "https://speed.cloudflare.com/__down?bytes=25000000",
               "ul": "https://speed.cloudflare.com/__up",
               "ping": "https://speed.cloudflare.com/__down?bytes=0"}
 LIBRESPEED_LIST = "https://librespeed.org/backend-servers/servers.php"
@@ -45,20 +47,34 @@ def custom_server(url: str) -> dict:
             "ul": _join(url, "empty.php"), "ping": _join(url, "empty.php")}
 
 
-def _latency(url: str, n: int = 6) -> tuple[float | None, float | None]:
+def _latency(url: str, n: int = 8) -> tuple[float | None, float | None]:
     samples = []
-    for _ in range(n):
-        t = time.perf_counter()
+    u = urllib.parse.urlsplit(url)
+    if not urllib.request.getproxies():
+        # One kept-alive connection, so each sample is a single request round trip.
+        cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=5) as r:
-                r.read(1)
-            samples.append((time.perf_counter() - t) * 1000)
-        except OSError:
+            c = cls(u.netloc, timeout=5)
+            for _ in range(n + 1):
+                t = time.perf_counter()
+                c.request("GET", u.path + ("?" + u.query if u.query else ""), headers=UA)
+                c.getresponse().read()
+                samples.append((time.perf_counter() - t) * 1000)
+            c.close()
+        except (OSError, http.client.HTTPException):
             pass
+    else:
+        for _ in range(n):
+            t = time.perf_counter()
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=5) as r:
+                    r.read(1)
+                samples.append((time.perf_counter() - t) * 1000)
+            except OSError:
+                pass
     if not samples:
         return None, None
     samples = samples[1:] or samples  # first one includes the TLS handshake
-    avg = sum(samples) / len(samples)
     jitter = sum(abs(a - b) for a, b in zip(samples, samples[1:])) / max(1, len(samples) - 1)
     return round(min(samples), 1), round(jitter, 1)
 
@@ -113,7 +129,7 @@ def run_test(server: dict, seconds: float = 7.0, threads: int = 4,
             self.stop, self.counter, self.sent = stop, counter, 0
 
         def read(self, n: int = 65536) -> bytes:
-            if self.stop.is_set() or self.sent >= 50 * 1024 * 1024:
+            if self.stop.is_set() or self.sent >= 25 * 1024 * 1024:
                 return b""
             self.sent += n
             self.counter[0] += n
@@ -124,13 +140,15 @@ def run_test(server: dict, seconds: float = 7.0, threads: int = 4,
             try:
                 req = urllib.request.Request(server["ul"], data=Body(stop, counter), method="POST",
                                              headers={**UA, "Content-Type": "application/octet-stream",
-                                                      "Content-Length": str(50 * 1024 * 1024)})
+                                                      "Content-Length": str(25 * 1024 * 1024)})
                 urllib.request.urlopen(req, timeout=10).read()
             except Exception:
                 time.sleep(0.2)
 
     res["download"] = _throughput(down, seconds, threads, (lambda v: progress("download", v)) if progress else None)
     res["upload"] = _throughput(up, seconds, threads, (lambda v: progress("upload", v)) if progress else None)
+    if not res["download"] and not res["upload"]:
+        res["error"] = "The speed test server did not transfer any data. Try another server."
     return res
 
 

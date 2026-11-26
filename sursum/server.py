@@ -190,9 +190,9 @@ def make_handler(app: App, port: int):
             if WEB.resolve() not in f.parents or not f.is_file():
                 self._send(404, b"not found", "text/plain")
                 return
-            ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
-            if f.suffix == ".js":
-                ctype = "text/javascript"
+            # Fixed table first: Windows takes MIME types from the registry, which is often wrong.
+            ctype = {".js": "text/javascript", ".css": "text/css", ".html": "text/html"}.get(
+                f.suffix) or mimetypes.guess_type(f.name)[0] or "application/octet-stream"
             self._send(200, f.read_bytes(), ctype + ("; charset=utf-8" if ctype.startswith("text/") else ""))
 
         def do_POST(self) -> None:  # noqa: N802

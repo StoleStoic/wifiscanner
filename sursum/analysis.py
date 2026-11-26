@@ -57,7 +57,10 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
     auth, neigh, home = ctx["auth"], ctx["neigh"], ctx["home"]
     exp = float(settings["home"].get("path_loss_exp", 3.0))
     perimeter = float(settings["home"].get("perimeter_m", 15))
-    lan_macs = [d["mac"] for d in lan if d.get("mac") and not d.get("self")]
+    # LAN devices that could be an unapproved AP's wired side: not this PC, not the router,
+    # not something you marked as known, and not an authorized AP's own interface.
+    lan_macs = [d["mac"] for d in lan if d.get("mac") and not (d.get("self") or d.get("gateway") or d.get("known"))
+                and d["mac"] not in auth and not any(_near(a, d["mac"]) for a in auth)]
     auth_sec = {n["ssid"]: n["security"] for n in nets if n["bssid"] in auth}
     items = []
     for n in nets:

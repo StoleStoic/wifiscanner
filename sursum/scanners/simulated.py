@@ -155,9 +155,9 @@ NETS = [
     dict(ssid="CafeGuest", bssid="f0:9f:c2:7a:01:5d", band="5", channel=149, width=20, std="ax", sec="owe", rssi=-84),
     dict(ssid="ATT-HOMEBASE", bssid="88:71:b1:d3:6e:f4", band="2.4", channel=11, width=20, std="ax", sec="wpa2", rssi=-77, pmf="capable"),
     dict(ssid="DIRECT-7A-HP OfficeJet", bssid="fa:da:0c:4b:2e:7a", band="2.4", channel=6, width=20, std="n", sec="wpa2", rssi=-63, wps=1, maker="HP", model="OfficeJet 8020"),
-    # appear later: an evil twin of the home SSID and a rogue hotspot on the home LAN vendor range
+    # appear later: an evil twin of the home SSID and a travel router plugged into the home LAN
     dict(ssid=HOME, bssid="02:1a:11:f3:9c:40", band="2.4", channel=6, width=20, std="n", sec="open", rssi=-58, after=25),
-    dict(ssid="setup-AB12", bssid="3c:28:6d:a1:10:0e", band="2.4", channel=1, width=20, std="n", sec="open", rssi=-55, after=40),
+    dict(ssid="TP-Link_Extender_77", bssid="98:da:c4:5b:77:11", band="2.4", channel=1, width=20, std="n", sec="open", rssi=-55, after=40),
 ]
 
 

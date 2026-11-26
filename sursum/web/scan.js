@@ -1,0 +1,163 @@
+// Scan view: sortable network table, freeform filter, export, and the SSID details panel.
+import { $, h, api, color, sigClass, SIG, duration, clock, download, toast, esc } from './util.js';
+import { S, nets, visible, th, setFilter, select, saveSettings, hist } from './state.js';
+
+const yes = v => (v ? 'Yes' : '');
+const list = v => (v || []).join(', ');
+export const COLS = [
+  { k: 'ssid', l: 'SSID', d: 1, f: n => n.ssid || '(hidden)' },
+  { k: 'bssid', l: 'BSSID (MAC)', d: 1 },
+  { k: 'vendor', l: 'Vendor', d: 1 },
+  { k: 'rssi', l: 'Signal dBm', d: 1, n: 1 },
+  { k: 'band', l: 'Band', d: 1, f: n => n.band + ' GHz' },
+  { k: 'channel', l: 'Channel', d: 1, n: 1 },
+  { k: 'width', l: 'Width MHz', d: 1, n: 1 },
+  { k: 'generation', l: 'WiFi', d: 1 },
+  { k: 'security', l: 'Security', d: 1 },
+  { k: 'threat', l: 'Class', d: 1 },
+  { k: 'stations', l: 'Stations', d: 1, n: 1 },
+  { k: 'utilization', l: 'Ch. util %', d: 1, n: 1 },
+  { k: 'uptime', l: 'AP uptime', d: 1, n: 1, f: n => duration(n.uptime) },
+  { k: 'max_rate', l: 'Max rate Mbps', d: 1, n: 1 },
+  { k: 'cci', l: 'Co-ch', d: 1, n: 1 }, { k: 'aci', l: 'Adj-ch', d: 1, n: 1 },
+  { k: 'noise', l: 'Noise dBm', n: 1 }, { k: 'snr', l: 'SNR dB', n: 1 }, { k: 'quality', l: 'Quality %', n: 1 },
+  { k: 'distance', l: 'Est. dist m', n: 1 },
+  { k: 'ap_name', l: 'AP name' }, { k: 'model', l: 'Model' },
+  { k: 'center_channel', l: 'Centre ch', n: 1 }, { k: 'freq', l: 'Freq MHz', n: 1 }, { k: 'center_freq', l: 'Centre MHz', n: 1 },
+  { k: 'secondary', l: 'Secondary ch' },
+  { k: 'standards', l: '802.11', f: n => list(n.standards) },
+  { k: 'streams', l: 'Streams', n: 1 },
+  { k: 'akm', l: 'Auth (AKM)', f: n => list(n.akm) }, { k: 'ciphers', l: 'Ciphers', f: n => list(n.ciphers) },
+  { k: 'pmf', l: 'PMF' }, { k: 'wps', l: 'WPS', f: n => yes(n.wps) },
+  { k: 'basic_rates', l: 'Basic rates', f: n => list(n.basic_rates) }, { k: 'rates', l: 'Rates', f: n => list(n.rates) },
+  { k: 'beacon_interval', l: 'Beacon TU', n: 1 }, { k: 'dtim', l: 'DTIM', n: 1 },
+  { k: 'country', l: 'Country' }, { k: 'tx_power', l: 'Tx power dBm', n: 1 }, { k: 'bss_color', l: 'BSS color', n: 1 },
+  { k: 'k', l: '11k', f: n => yes(n.k) }, { k: 'v', l: '11v', f: n => yes(n.v) }, { k: 'r', l: '11r', f: n => yes(n.r) },
+  { k: 'wmm', l: 'WMM', f: n => yes(n.wmm) }, { k: 'mu_mimo', l: 'MU-MIMO', f: n => yes(n.mu_mimo) },
+  { k: 'beamforming', l: 'Beamforming', f: n => yes(n.beamforming) }, { k: 'twt', l: 'TWT', f: n => yes(n.twt) },
+  { k: 'mlo', l: 'MLO', f: n => yes(n.mlo) }, { k: 'hotspot2', l: 'Hotspot 2.0', f: n => yes(n.hotspot2) },
+  { k: 'mode', l: 'Mode' }, { k: 'rssi_max', l: 'Max dBm', n: 1 }, { k: 'rssi_min', l: 'Min dBm', n: 1 },
+  { k: 'first_seen', l: 'First seen', n: 1, f: n => clock(n.first_seen) },
+  { k: 'last_seen', l: 'Last seen', n: 1, f: n => clock(n.last_seen) }, { k: 'seen', l: 'Times seen', n: 1 },
+];
+const CLASS = { authorized: ['Mine', 'good'], rogue: ['ROGUE', 'bad'], unauthorized: ['Unauthorized', 'poor'],
+  neighbor: ['Neighbor', 'info'], unclassified: ['—', ''] };
+const text = (c, n) => (c.f ? c.f(n) : n[c.k] ?? '');
+let sort = { k: 'rssi', dir: -1 }, root, shown = null;
+
+const active = () => { const want = S.settings?.columns?.length ? S.settings.columns : COLS.filter(c => c.d).map(c => c.k); return COLS.filter(c => want.includes(c.k)); };
+
+export function rows() {
+  const c = COLS.find(x => x.k === sort.k) || COLS[0];
+  return visible().sort((a, b) => {
+    const x = a[c.k], y = b[c.k];
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * sort.dir;
+  });
+}
+export function toDelimited(sep) {
+  const cols = active(), q = v => { v = String(v); return sep === ',' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  return [cols.map(c => q(c.l)).join(sep), ...rows().map(n => cols.map(c => q(text(c, n))).join(sep))].join('\r\n');
+}
+
+export function mount(el) {
+  root = el; el.className = 'fill';
+  const input = h('input', { type: 'text', id: 'filter', value: S.filterText, spellcheck: 'false',
+    placeholder: 'Filter, e.g.  5ghz & wpa3 ^ wpa2 , rssi>-60 & !neighbor      (& and   , or   ! not   ^ or-within-and)',
+    oninput: e => setFilter(e.target.value) });
+  const saved = () => h('select', { onchange: e => { if (e.target.value) { input.value = e.target.value; setFilter(e.target.value); } e.target.selectedIndex = 0; } },
+    h('option', { value: '' }, 'Saved filters…'), (S.settings.filters || []).map(f => h('option', { value: f.expr }, f.name)));
+  const bar = h('div', { class: 'filterbar' }, input, h('span', { id: 'savedf' }, saved()),
+    h('button', { title: 'Save the current filter for quick recall', onclick: async () => {
+      if (!S.filterText.trim()) return toast('Type a filter first.');
+      const name = prompt('Name for this filter:', S.filterText); if (!name) return;
+      await saveSettings({ filters: [...S.settings.filters.filter(f => f.name !== name), { name, expr: S.filterText }] });
+      $('#savedf').replaceChildren(saved()); toast('Filter saved.');
+    } }, 'Save filter'),
+    h('button', { title: 'Delete a saved filter', onclick: async () => {
+      const name = prompt('Delete which saved filter?\n' + S.settings.filters.map(f => '• ' + f.name).join('\n')); if (!name) return;
+      await saveSettings({ filters: S.settings.filters.filter(f => f.name !== name) }); $('#savedf').replaceChildren(saved());
+    } }, '✕'),
+    h('button', { onclick: e => columnMenu(e.target) }, 'Columns'),
+    h('button', { title: 'Copy the table so it pastes straight into Excel', onclick: async () => { await navigator.clipboard.writeText(toDelimited('\t')); toast('Copied. Paste into Excel.'); } }, 'Copy for Excel'),
+    h('button', { onclick: () => download(`wifi-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, toDelimited(','), 'text/csv') }, 'Export CSV'),
+    h('span', { id: 'fcount', class: 'dim' }));
+  el.append(bar, h('div', { class: 'scanwrap' }, h('div', { class: 'tablewrap' }, h('table', { id: 'nettable' })), h('aside', { id: 'details' })));
+  update(); details(S.selected);
+}
+
+function columnMenu(btn) {
+  if ($('.menu')) return $('.menu').remove();
+  const want = new Set(active().map(c => c.k));
+  const m = h('div', { class: 'menu' }, COLS.map(c => h('label', {}, h('input', { type: 'checkbox', checked: want.has(c.k), onchange: e => {
+    e.target.checked ? want.add(c.k) : want.delete(c.k);
+    saveSettings({ columns: COLS.filter(x => want.has(x.k)).map(x => x.k) }).then(update);
+  } }), ' ' + c.l)));
+  const r = btn.getBoundingClientRect();
+  m.style.top = r.bottom + 4 + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
+  document.body.append(m);
+  setTimeout(() => document.addEventListener('click', function f(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('click', f); } }), 0);
+}
+
+export function update() {
+  if (!root?.isConnected) return;
+  const cols = active(), rs = rows(), t = th();
+  $('#filter').classList.toggle('err', !!S.filterError);
+  $('#filter').title = S.filterError || '';
+  $('#fcount').textContent = S.filterError ? S.filterError : `${rs.length} of ${nets().length}`;
+  const head = h('tr', {}, cols.map(c => h('th', { class: c.n ? 'num' : '', onclick: () => { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : (c.n ? -1 : 1) }; update(); } },
+    c.l + (sort.k === c.k ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''))));
+  const body = rs.map(n => h('tr', { class: (n.bssid === S.selected ? 'sel ' : '') + (n.connected ? 'me' : ''), onclick: () => select(n.bssid) }, cols.map(c => {
+    if (c.k === 'ssid') return h('td', {}, h('span', { class: 'chip', style: `background:${color(n.bssid)}` }), n.ssid || h('span', { class: 'dim' }, '(hidden)'), n.connected ? h('span', { class: 'badge good', style: 'margin-left:6px' }, 'connected') : null);
+    if (c.k === 'rssi') { const k = sigClass(n.rssi, t); return h('td', { class: 'num' }, n.rssi, h('span', { class: 'bar' }, h('i', { style: `width:${n.quality}%;background:${SIG[k]}` }))); }
+    if (c.k === 'security') { const weak = ['Open', 'WEP', 'WPA-Personal'].includes(n.security); return h('td', {}, weak ? h('span', { class: 'badge bad' }, n.security) : n.security, n.wps ? h('span', { class: 'badge fair', style: 'margin-left:5px' }, 'WPS') : null); }
+    if (c.k === 'threat') { const [l, k] = CLASS[n.threat] || ['', '']; return h('td', {}, k ? h('span', { class: 'badge ' + k }, l) : l); }
+    return h('td', { class: c.n ? 'num' : '' }, String(text(c, n)));
+  })));
+  $('#nettable').replaceChildren(h('thead', {}, head), h('tbody', {}, body.length ? body : h('tr', {}, h('td', { colspan: cols.length, class: 'dim', style: 'padding:30px;text-align:center' },
+    nets().length ? 'No networks match the filter.' : 'Scanning… networks appear here within a few seconds.'))));
+  if (S.selected && shown !== S.selected) details(S.selected);
+}
+export const onSelect = b => { update(); details(b); };
+export const onAnalysis = update;
+
+// ---- details panel: summary + raw tagged parameters
+function decoded(d) {
+  const rowsOut = Object.entries(d).filter(([, v]) => v !== null && v !== '').map(([k, v]) =>
+    `<tr><td class="dim">${esc(k.replace(/_/g, ' '))}</td><td>${esc(Array.isArray(v) ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : x).join(', ') : typeof v === 'object' ? JSON.stringify(v) : v)}</td></tr>`).join('');
+  return rowsOut ? `<table>${rowsOut}</table>` : '';
+}
+async function details(bssid) {
+  const box = $('#details'); if (!box) return;
+  shown = bssid;
+  let n = nets().find(x => x.bssid === bssid);
+  if (!n) return box.replaceChildren(h('p', { class: 'dim' }, 'Select a network to inspect its details and raw tagged parameters (information elements).'));
+  if (!S.loaded) { const full = await api('/api/network?bssid=' + bssid); if (shown !== bssid) return; if (full.bssid) n = { ...n, ...full, threat: n.threat, distance: n.distance }; }
+  const t = S.threats?.aps.find(x => x.bssid === bssid), hs = hist(bssid);
+  const dl = (pairs) => h('dl', {}, pairs.filter(p => p[1] != null && p[1] !== '').flatMap(([a, b]) => [h('dt', {}, a), h('dd', {}, String(b))]));
+  box.replaceChildren(
+    h('div', { class: 'row' }, h('h2', { class: 'grow', style: 'margin:0' }, h('span', { class: 'chip', style: `background:${color(bssid)}` }), n.ssid || '(hidden)'),
+      h('button', { class: 'small', title: 'Track this access point’s signal to find it physically', onclick: () => window.sursumGo('threats', { locate: bssid }) }, 'Locate')),
+    t && t.cls !== 'unclassified' ? h('p', {}, h('b', { class: 'sev-' + t.severity }, t.label), ' ', h('span', { class: 'dim' }, t.reasons.join(' '))) : null,
+    h('h3', {}, 'Radio'),
+    dl([['BSSID', n.bssid], ['Vendor', n.vendor], ['AP name', n.ap_name], ['Model', n.model], ['Signal', `${n.rssi} dBm (${n.quality}%)`],
+      ['Seen range', hs.length ? `${Math.min(...hs.map(x => x[1]))} to ${Math.max(...hs.map(x => x[1]))} dBm` : null],
+      ['Noise / SNR', n.noise != null ? `${n.noise} dBm / ${n.snr} dB` : 'Not reported by this adapter'],
+      ['Est. distance', t ? `~${t.distance.m} m (range ${t.distance.min}–${t.distance.max} m)` : null],
+      ['Band / channel', `${n.band} GHz, primary channel ${n.channel} (${n.freq} MHz)`],
+      ['Channel width', `${n.width} MHz, centre channel ${n.center_channel} (${n.center_freq} MHz)` + (n.secondary ? `, secondary ${n.secondary}` : '')],
+      ['Standard', `${n.generation} (802.11 ${(n.standards || []).join('/')})`], ['Streams / max rate', `${n.streams ?? '?'} × / ${n.max_rate} Mbps`],
+      ['Stations', n.stations], ['Channel utilization', n.utilization != null ? n.utilization + ' %' : null],
+      ['Co / adjacent-channel', `${n.cci ?? 0} / ${n.aci ?? 0} networks`], ['AP uptime', duration(n.uptime)],
+      ['Beacon / DTIM', `${n.beacon_interval} TU / ${n.dtim ?? '?'}`], ['Country', n.country], ['Tx power', n.tx_power != null ? n.tx_power + ' dBm' : null]]),
+    h('h3', {}, 'Security'),
+    dl([['Security', n.security], ['Authentication', list(n.akm)], ['Pairwise ciphers', list(n.ciphers)], ['Group cipher', n.group_cipher],
+      ['Management frame protection', n.pmf], ['WPS', n.wps ? (n.wps_locked ? 'Enabled (locked)' : 'Enabled') : 'Off'],
+      ['Capabilities', list(n.cap_flags)],
+      ['Features', [n.k && '802.11k', n.v && '802.11v', n.r && '802.11r', n.wmm && 'WMM', n.mu_mimo && 'MU-MIMO', n.beamforming && 'Beamforming', n.twt && 'TWT', n.mlo && 'Multi-Link', n.hotspot2 && 'Hotspot 2.0'].filter(Boolean).join(', ')]]),
+    h('h3', {}, `Tagged parameters (${(n.ies || []).length})`),
+    (n.ies || []).length ? (n.ies || []).map(e => h('details', { class: 'ie' },
+      h('summary', {}, h('b', {}, e.name), h('span', { class: 'dim' }, `  tag ${e.id}${e.ext != null ? '/' + e.ext : ''} · ${e.len} bytes`)),
+      h('div', { html: decoded(e.decoded) }), h('code', {}, e.hex)))
+      : h('p', { class: 'dim' }, n.ie_note || 'No raw elements available for this entry.'));
+}
