@@ -131,7 +131,7 @@ function drawTime(cv, list) {
   for (const k of ['good', 'fair', 'poor']) { ctx.strokeStyle = SIG[k]; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(PAD.l, yOf(t[k], hgt)); ctx.lineTo(w - PAD.r, yOf(t[k], hgt)); ctx.stroke(); }
   ctx.setLineDash([]); ctx.globalAlpha = 1;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = INK.axis;
-  for (let i = 0; i <= 5; i++) { const s = windowSec * (1 - i / 5); ctx.fillText(s ? `-${s >= 120 ? Math.round(s / 60) + ' min' : s + ' s'}` : 'now', PAD.l + (w - PAD.l - PAD.r) * i / 5, base + 6); }
+  for (let i = 0; i <= 5; i++) { const s = Math.round(windowSec * (1 - i / 5)); ctx.fillText(s ? `-${s >= 120 ? Math.round(s / 60) + ' min' : s + ' s'}` : 'now', PAD.l + (w - PAD.l - PAD.r) * i / 5, base + 6); }
   ctx.save(); ctx.beginPath(); ctx.rect(PAD.l, PAD.t - 6, w - PAD.l - PAD.r, base - PAD.t + 8); ctx.clip();
   for (const n of list) {
     const pts = hist(n.bssid).filter(p => p[0] >= start - 30);
