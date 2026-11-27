@@ -24,14 +24,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q tshark > /dev/null
-          python - <<'PY'
-          from sursum.scanners import pcapwrite, simulated
-          s = simulated.SimulatedScanner(); s.t0 -= 100
-          nets, _ = s.scan()
-          open("scan.pcapng", "wb").write(pcapwrite.write(nets)[0])
-          print(len(nets), file=open("count.txt", "w"))
-          PY
-          test "$(tshark -r scan.pcapng -Y 'wlan.fc.type_subtype==8 && radiotap.channel.freq && wlan.bssid' 2>/dev/null | wc -l)" = "$(cat count.txt)"
+          python tests/check_pcapng.py
 
   windows-installer:
     needs: test
