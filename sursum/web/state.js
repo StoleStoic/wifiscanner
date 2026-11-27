@@ -59,7 +59,7 @@ export async function refreshAnalysis() {
   const a = S.loaded ? await api('/api/analysis', { networks: S.loaded.networks.map(({ ies, ie_hex, ...n }) => n) }) : await api('/api/analysis');
   S.threats = a.threats; S.notes = a.notes; S.ai = a.ai || {}; S.aiRunning = a.ai_running;
   const cls = Object.fromEntries(a.threats.aps.map(t => [t.bssid, t]));
-  for (const n of nets()) { n.threat = cls[n.bssid]?.cls; n.distance = cls[n.bssid]?.distance?.m; n._text = undefined; }
+  for (const n of nets()) { n.threat = cls[n.bssid]?.cls; n.distance = cls[n.bssid]?.distance?.m; n.note = S.settings?.annotations?.[n.bssid] || ''; n._text = undefined; }
   emit('analysis');
 }
 
@@ -71,7 +71,7 @@ export async function poll() {
     S.live = d.networks; S.conn = d.connection; S.status = d.status; S.roams = d.roams; S.now = d.now; S.version = d.version;
     for (const n of S.live) {
       const o = seenBefore[n.bssid];
-      n.threat = o?.threat; n.distance = o?.distance;
+      n.threat = o?.threat; n.distance = o?.distance; n.note = S.settings?.annotations?.[n.bssid] || '';
       const hs = (S.history[n.bssid] ||= []);
       if (!hs.length || hs[hs.length - 1][0] < n.last_seen - 0.5) { hs.push([n.last_seen, n.rssi]); if (hs.length > 300) hs.shift(); }
     }

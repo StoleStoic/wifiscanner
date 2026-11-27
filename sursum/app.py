@@ -41,12 +41,12 @@ def _already_running(port: int) -> bool:
 
 MENUS = [
     ("File", [("Save Session...\tCtrl+S", "session-save"), ("Import Session File...", "session-import"),
-              ("Open Capture File (pcap)...", "pcap-open"), None, ("Export Table as CSV...", "export-csv"), ("Export Analysis as CSV...", "export-analysis"), None,
+              ("Open Capture File (pcap)...", "pcap-open"), None, ("Save Scan as PCAPNG...", "save-pcapng"), ("Export Table as CSV...", "export-csv"), ("Export Analysis as CSV...", "export-analysis"), None,
               ("Sessions", "tab:sessions"), ("Settings", "tab:settings"), None, ("Exit", "exit")]),
     ("Edit", [("Copy Table for Excel", "copy"), ("Filter...\tCtrl+F", "find"), None, ("Choose Columns...", "columns"),
               ("Clear Network List", "clear")]),
     ("View", [("Scan", "tab:scan"), ("Spectrum", "tab:spectrum"), ("Signal", "tab:signal"), ("Threats", "tab:threats"),
-              ("Analysis", "tab:analysis"), ("Speed Test", "tab:speed"), ("Devices", "tab:devices"), ("Map", "tab:map"),
+              ("Analysis", "tab:analysis"), ("Speed Test", "tab:speed"), ("Devices", "tab:devices"), ("Map", "tab:map"), ("Monitor", "tab:monitor"),
               ("Survey", "tab:survey"), None, ("Light Theme", "theme-light"), ("Dark Theme", "theme-dark")]),
     ("Scan", [("Pause Scanning", "pause"), ("Resume Scanning", "resume"), ("Scan Now", "rescan"), None,
               ("Scan My Network for Devices", "scan-devices"), None,

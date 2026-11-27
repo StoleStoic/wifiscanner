@@ -49,7 +49,7 @@ function term(text) {
 export function rowText(n) {
   return [n.ssid || '(hidden)', n.bssid, n.vendor, n.ap_name, n.band + 'ghz', 'ch' + n.channel, n.width + 'mhz', n.generation,
     (n.standards || []).map(s => '802.11' + s).join(' '), n.security, (n.akm || []).join(' '), (n.ciphers || []).join(' '),
-    n.wps ? 'wps' : '', n.connected ? 'connected' : '', n.country, n.model, n.threat || ''].join(' ').toLowerCase();
+    n.wps ? 'wps' : '', n.connected ? 'connected' : '', n.country, n.model, n.threat || '', n.note || ''].join(' ').toLowerCase();
 }
 
 // Returns {fn, error}. An empty expression matches everything.

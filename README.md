@@ -32,7 +32,7 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 
 | Tab | Contents |
 | --- | --- |
-| Scan | Network table with quick filters (All / 2.4 / 5 / 6 GHz, Open / Secure, and a picker for specific network names), a freeform filter with saved filters, CSV export and copy for Excel. The lower pane shows Network Details, a Spectrum of all bands with the selected network highlighted, or Advanced Details (every tagged parameter of the beacon). WiFi scanning works whether or not the PC is connected to WiFi, including on Ethernet. |
+| Scan | Network table with quick filters (All / 2.4 / 5 / 6 GHz, Open / Secure, and a picker for specific network names), a freeform filter with saved filters, CSV export, copy for Excel, and Save PCAPNG (a capture file Wireshark opens). Right-click a cell to filter by its value or add a note to an access point. The lower pane shows Network Details, a Spectrum of all bands with the selected network highlighted, or Advanced Details (every tagged parameter of the beacon). WiFi scanning works whether or not the PC is connected to WiFi, including on Ethernet. |
 | Spectrum | 2.4, 5 and 6 GHz spectrum with primary channel markers for 20/40/80/160/320 MHz channels; co-channel and adjacent-channel interference charts. |
 | Signal | Signal vs. time, and a signal ranking with adjustable thresholds, for any band or the band your PC is on. |
 | Threats | Rogue AP, unauthorized AP, rogue client, accidental association and neighbor classification; threat vector map; authorized inventory import/export; a locator that tracks one BSSID so you can walk to it. |
@@ -40,6 +40,7 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 | Speed Test | Single, repeating, or automatic on roaming, with a choice of servers and a room label on each result. |
 | Survey | Click-where-you-stand survey on a floor plan image, passive or active, with heatmaps per SSID or BSSID, adjustable colour range, speed tests at points, and estimated access point positions. |
 | Devices | Every device seen by any scan, merged into one list: type, maker, addresses, services, the access point it uses, first and last seen. Authorize, name and categorize each one (or many at once); optional identification by Claude. **Import router list** brings in the AT&T gateway's own device list (fetched from the gateway or pasted), which includes devices that are off, behind your other routers, or on a part of the network this PC cannot scan. |
+| Monitor | Keeps checking every device and your internet connection: up or down, response time, packet loss, history charts and an event log (down, recovered, slow, losing packets), exportable to CSV. Runs while the program is open. |
 | Map | All access points and devices and what is connected to what. Right-click for options. |
 | Sessions | Save, reopen, import, download and compare scans; open pcap / pcapng captures. |
 | Settings, Help | Scan timing, home perimeter, remote probes, Claude key; filter syntax and articles. |

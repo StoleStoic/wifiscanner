@@ -14,7 +14,8 @@ from . import __version__, ai, analysis, routerlist
 from .engine import Engine, interference
 from .devices import TYPES, Registry
 from .ipscan import IPScanner
-from .scanners import ScanError, pcap
+from .monitor import Monitor
+from .scanners import ScanError, pcap, pcapwrite
 from .speedtest import SpeedTester
 from .store import Store
 
@@ -29,6 +30,7 @@ class App:
         self.engine = Engine(self.store, on_roam=self.speed.on_roam)
         self.registry = Registry(self.store)
         self.ipscan = IPScanner(self.store, lambda: self.engine.source == "demo", self.registry)
+        self.monitor = Monitor(self.store, self.registry, lambda: self.engine.source == "demo")
         self.identify: dict = {}
         self.identify_running = False
         self.ai_result: dict = {}
@@ -61,6 +63,8 @@ class App:
             return self.analysis()
         if path == "/api/surveys":
             return self.store.load("surveys", {"surveys": []})
+        if path == "/api/monitor":
+            return self.monitor.status(q.get("detail", [None])[0])
         raise KeyError(path)
 
     def analysis(self, nets: list[dict] | None = None) -> dict:
@@ -215,6 +219,16 @@ class App:
         if path == "/api/surveys":
             self.store.save("surveys", data)
             return {"ok": True}
+        if path == "/api/monitor":
+            if data.get("action") == "clear":
+                self.monitor.clear_events()
+            else:
+                self.monitor.check_now()
+            return self.monitor.status()
+        if path == "/api/pcapng":  # a loaded session or capture, sent back as a file the UI saves
+            import base64
+            blob, n = pcapwrite.write(data.get("networks") or [])
+            return {"count": n, "b64": base64.b64encode(blob).decode()}
         raise KeyError(path)
 
 

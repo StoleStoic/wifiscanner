@@ -409,3 +409,73 @@ Mesh Client\tNo
                                    ("DESKTOP-IK9VS3F", "", "Computer"), ("chromeos", "", "Computer"), ("ZenWiFi_XT8-7780", "", "Network equipment"),
                                    ("APNanoLivingRoom", "Ubiquiti Inc", "Network equipment")]:
             self.assertEqual(guess_type(dict(hostname=host, vendor=vendor))[0], want, host)
+
+
+class PcapngExport(unittest.TestCase):
+    def test_written_capture_reads_back_identically(self):
+        from sursum.scanners import pcapwrite
+        s = simulated.SimulatedScanner()
+        s.t0 -= 100
+        nets, _ = s.scan()
+        blob, count = pcapwrite.write(nets)
+        self.assertEqual(count, len(nets))
+        self.assertEqual(blob[:4], b"\n\r\r\n")
+        back, stats = pcap.read(blob)
+        self.assertEqual(stats["beacons"], len(nets))
+        a, b = {n["bssid"]: n for n in nets}, {n["bssid"]: n for n in back}
+        self.assertEqual(set(a), set(b))
+        for k in a:
+            for f in ("ssid", "channel", "band", "width", "security", "generation", "ie_hex", "beacon_interval"):
+                self.assertEqual(a[k][f], b[k][f], (k, f))
+            self.assertEqual(round(a[k]["rssi"]), b[k]["rssi"])
+        self.assertEqual(pcapwrite.write([{"bssid": "aa:bb:cc:dd:ee:ff", "ie_hex": ""}])[1], 0)  # nothing to rebuild from
+
+
+class Monitoring(unittest.TestCase):
+    def setUp(self):
+        from sursum.devices import Registry
+        from sursum.monitor import Monitor
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.dir.name))
+        self.store.settings["monitor"]["enabled"] = False  # drive cycles by hand
+        self.reg = Registry(self.store)
+        self.reg.observe("aa:aa:aa:00:00:01", "lan", ip="10.0.0.5", hostname="tv", online=True)
+        self.mon = Monitor(self.store, self.reg, lambda: False)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def run_cycles(self, replies):
+        import sursum.monitor as m
+        real = m.ping
+        try:
+            for r in replies:
+                m.ping = lambda ip, timeout_ms=1000, r=r: r.get(ip, 20.0)
+                self.mon._cycle()
+        finally:
+            m.ping = real
+
+    def test_down_up_slow_events_and_stats(self):
+        self.run_cycles([{}] * 3)
+        t = next(x for x in self.mon.status()["targets"] if x["ip"] == "10.0.0.5")
+        self.assertEqual((t["up"], t["loss"], t["avg"], t["uptime"]), (True, 0.0, 20.0, 100.0))
+        self.run_cycles([{"10.0.0.5": None}] * 2)
+        self.assertEqual([e["kind"] for e in self.mon.status()["events"]], [])        # two misses: not down yet
+        self.run_cycles([{"10.0.0.5": None}])
+        self.run_cycles([{"10.0.0.5": 400.0}, {}])
+        self.assertEqual([e["kind"] for e in self.mon.status()["events"]], ["down", "up", "slow"])
+        st = self.mon.status("aa:aa:aa:00:00:01")
+        t = next(x for x in st["targets"] if x["ip"] == "10.0.0.5")
+        self.assertEqual((t["up"], t["samples"], len(st["detail"]["history"])), (True, 8, 8))
+        self.assertAlmostEqual(t["loss"], 37.5)
+        self.assertEqual({x["kind"] for x in st["targets"]}, {"device", "internet"})
+
+    def test_never_reachable_target_raises_no_alarm(self):
+        self.run_cycles([{"10.0.0.5": None}] * 5)
+        self.assertEqual(self.mon.status()["events"], [])
+
+    def test_ping_parsing(self):
+        import sursum.monitor as m
+        self.assertEqual(float(m._TIME.search("Reply from 1.1.1.1: bytes=32 time=14ms TTL=57").group(1)), 14)
+        self.assertEqual(float(m._TIME.search("Reply from 192.168.1.1: bytes=32 time<1ms TTL=64").group(1)), 1)
+        self.assertEqual(float(m._TIME.search("64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=0.512 ms").group(1)), 0.512)

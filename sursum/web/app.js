@@ -8,6 +8,7 @@ import * as threats from './threats.js';
 import * as analysis from './analysis.js';
 import * as devices from './devices.js';
 import * as netmap from './map.js';
+import * as monitor from './monitor.js';
 import * as sessions from './sessions.js';
 import * as settings from './settings.js';
 import * as help from './help.js';
@@ -15,7 +16,7 @@ import * as help from './help.js';
 const TABS = [
   ['scan', 'Scan', scan], ['spectrum', 'Spectrum', charts.spectrum], ['signal', 'Signal', charts.signal],
   ['threats', 'Threats', threats], ['analysis', 'Analysis', analysis], ['speed', 'Speed Test', speed],
-  ['devices', 'Devices', devices], ['map', 'Map', netmap],
+  ['devices', 'Devices', devices], ['map', 'Map', netmap], ['monitor', 'Monitor', monitor],
   ['survey', 'Survey', survey], ['sessions', 'Sessions', sessions],
   ['settings', 'Settings', settings], ['help', 'Help', help],
 ];
@@ -104,6 +105,7 @@ const COMMANDS = {
   'ask-claude': () => press('analysis', 'Ask Claude'), identify: () => press('devices', 'Identify'),
   'theme-light': () => { setTheme('light'); go(S.tab); }, 'theme-dark': () => { setTheme('dark'); go(S.tab); },
   'export-analysis': () => press('analysis', 'Export CSV'),
+  'save-pcapng': () => scan.savePcapng(),
   'help-filters': () => go('help', 'filters'), about,
 };
 let ready = false; const queued = [];  // menu clicks made before the first data has loaded wait for it

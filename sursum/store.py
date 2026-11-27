@@ -23,6 +23,8 @@ DEFAULTS: dict[str, Any] = {
                   "interval": 300, "room": "", "rooms": ["Living room", "Kitchen", "Office", "Bedroom"],
                   "custom_url": ""},
     "ipscan": {"cidr": ""},
+    "monitor": {"enabled": True, "interval": 30, "latency_ms": 150, "loss_pct": 20, "scope": "online"},
+    "annotations": {},  # bssid -> note
     "ai": {"api_key": "", "model": "claude-opus-5-5"},
     "columns": [],
 }

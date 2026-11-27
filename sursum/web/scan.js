@@ -17,6 +17,7 @@ export const COLS = [
   { k: 'generation', l: 'WiFi', d: 1 },
   { k: 'security', l: 'Security', d: 1 },
   { k: 'threat', l: 'Class', d: 1 },
+  { k: 'note', l: 'Note', d: 1 },
   { k: 'stations', l: 'Stations', d: 1, n: 1 },
   { k: 'utilization', l: 'Ch. util %', d: 1, n: 1 },
   { k: 'uptime', l: 'AP uptime', d: 1, n: 1, f: n => duration(n.uptime) },
@@ -83,6 +84,7 @@ export function mount(el) {
     h('button', { onclick: e => columnMenu(e.target) }, 'Columns'),
     h('button', { title: 'Copy the table so it pastes straight into Excel', onclick: async () => { await navigator.clipboard.writeText(toDelimited('\t')); toast('Copied. Paste into Excel.'); } }, 'Copy for Excel'),
     h('button', { onclick: () => download(`wifi-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, toDelimited(','), 'text/csv') }, 'Export CSV'),
+    h('button', { title: 'Save the networks shown as a capture file that Wireshark opens', onclick: savePcapng }, 'Save PCAPNG'),
     h('span', { id: 'fcount', class: 'dim' }));
   const top = h('div', { class: 'tablewrap', id: 'scantop', style: `flex:0 0 ${split}%` }, h('table', { id: 'nettable' }));
   // drag the divider to give the table or the lower pane more room
@@ -104,6 +106,18 @@ function paneTabs() {
     h('button', { class: k === pane ? 'on' : '', onclick: () => { pane = k; update(); details(S.selected); } }, l)));
   $('#scanspec').style.display = pane === 'spectrum' ? 'block' : 'none';
   const d = $('#details'); d.style.display = pane === 'spectrum' ? 'none' : 'block'; d.dataset.mode = pane;
+}
+
+// Save what is displayed as a Wireshark-readable capture (one rebuilt beacon per access point).
+export async function savePcapng() {
+  const shown = rows(); let list = shown;
+  if (!S.loaded) { const full = await Promise.all(shown.map(n => api('/api/network?bssid=' + n.bssid))); list = full.filter(n => n.bssid); }
+  const r = await api('/api/pcapng', { networks: list });
+  if (!r.count) return toast('Nothing to save: these entries carry no raw beacon data (remote scans do not).', true);
+  const bin = Uint8Array.from(atob(r.b64), c => c.charCodeAt(0));
+  const a = h('a', { href: URL.createObjectURL(new Blob([bin], { type: 'application/octet-stream' })), download: `wifi-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.pcapng` });
+  document.body.append(a); a.click(); a.remove();
+  toast(`Saved ${r.count} access point(s) as PCAPNG` + (r.count < shown.length ? ` (${shown.length - r.count} had no raw beacon data).` : '.'));
 }
 
 function columnMenu(btn) {
@@ -136,7 +150,12 @@ export function update() {
     c.l + (sort.k === c.k ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''))));
   const body = rs.map(n => h('tr', { class: (n.bssid === S.selected ? 'sel ' : '') + (n.connected ? 'me' : ''), onclick: () => select(n.bssid), oncontextmenu: e => {
     e.preventDefault(); select(n.bssid);
-    menu(e.clientX, e.clientY, [['Mark as mine (authorized)', () => mark([n.bssid], 'auth')], ['Mark as neighbor', () => mark([n.bssid], 'neighbor')], ['Remove mark', () => mark([n.bssid], 'none')], null,
+    const td = e.target.closest('td'), col = td ? cols[[...td.parentElement.children].indexOf(td)] : null, raw = col ? n[col.k] : null;
+    const val = raw == null || raw === '' || Array.isArray(raw) ? null : typeof raw === 'boolean' ? (raw ? 'yes' : 'no') : String(raw);
+    const lit = v => (/[,&^()! ]/.test(v) ? `"${v}"` : v), add = t => { const f = S.filterText.trim() ? `${S.filterText.trim()} & ${t}` : t; $('#filter').value = f; setFilter(f); };
+    menu(e.clientX, e.clientY, [...(val != null ? [[`Show only ${col.l} = ${val}`, () => add(`${col.k}=${lit(val)}`)], [`Hide ${col.l} = ${val}`, () => add(`${col.k}!=${lit(val)}`)], ['Copy this value', () => navigator.clipboard.writeText(val)], null] : []),
+      [n.note ? 'Edit note…' : 'Add note…', async () => { const t = prompt(`Note for ${n.ssid || n.bssid}:`, n.note || ''); if (t != null) { await saveSettings({ annotations: { [n.bssid]: t.trim() } }); n.note = t.trim(); update(); } }], null,
+      ['Mark as mine (authorized)', () => mark([n.bssid], 'auth')], ['Mark as neighbor', () => mark([n.bssid], 'neighbor')], ['Remove mark', () => mark([n.bssid], 'none')], null,
       ['Locate this access point', () => window.sursumGo('threats', { locate: n.bssid })], ['Show its devices on the Map', () => window.sursumGo('map', { ap: n.bssid })], ['Copy BSSID', () => navigator.clipboard.writeText(n.bssid)]]);
   } }, cols.map(c => {
     if (c.k === 'ssid') return h('td', {}, h('span', { class: 'chip', style: `background:${color(n.bssid)}` }), n.ssid || h('span', { class: 'dim' }, '(hidden)'), n.connected ? h('span', { class: 'badge good', style: 'margin-left:6px' }, 'connected') : null);
