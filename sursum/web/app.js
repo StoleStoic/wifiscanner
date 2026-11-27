@@ -51,7 +51,7 @@ function renderStatus() {
     h('span', {}, h('b', {}, `${c.rssi ?? '?'} dBm`)),
     c.channel ? h('span', {}, `${c.band} GHz ch ${c.channel} / ${c.width} MHz`) : null,
     c.rx_rate ? h('span', {}, `↓${c.rx_rate} ↑${c.tx_rate} Mbps link`) : null,
-  ] : [h('span', {}, S.offline ? 'The scanner has stopped — close this window and start it again from the Start menu.' : 'Not connected to WiFi')]));
+  ] : [h('span', {}, S.offline ? 'The scanner has stopped — close this window and start it again from the Start menu.' : `Scanning: ${st.adapter || 'WiFi'} | Not associated`)]));
   const probes = (S.settings?.probes || []).map(p => ['remote:' + p.name, 'Remote: ' + p.name]);
   $('#scanctl').replaceChildren(
     h('span', { class: 'dim' }, S.loaded ? '' : `${st.count ?? 0} networks · scan ${st.scans ?? 0}`),

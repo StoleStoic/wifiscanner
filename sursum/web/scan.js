@@ -2,6 +2,7 @@
 import { $, h, api, color, sigClass, SIG, duration, clock, download, toast, esc, menu } from './util.js';
 import { mark } from './threats.js';
 import { S, nets, visible, th, setFilter, select, saveSettings, hist } from './state.js';
+import { drawSpectrum, spectrumClick, quickBar } from './charts.js';
 
 const yes = v => (v ? 'Yes' : '');
 const list = v => (v || []).join(', ');
@@ -83,8 +84,26 @@ export function mount(el) {
     h('button', { title: 'Copy the table so it pastes straight into Excel', onclick: async () => { await navigator.clipboard.writeText(toDelimited('\t')); toast('Copied. Paste into Excel.'); } }, 'Copy for Excel'),
     h('button', { onclick: () => download(`wifi-scan-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, toDelimited(','), 'text/csv') }, 'Export CSV'),
     h('span', { id: 'fcount', class: 'dim' }));
-  el.append(bar, h('div', { class: 'scanwrap' }, h('div', { class: 'tablewrap' }, h('table', { id: 'nettable' })), h('aside', { id: 'details' })));
+  const top = h('div', { class: 'tablewrap', id: 'scantop', style: `flex:0 0 ${split}%` }, h('table', { id: 'nettable' }));
+  // drag the divider to give the table or the lower pane more room
+  const divider = h('div', { class: 'divider', title: 'Drag to resize', onpointerdown: e => {
+    const box = el.querySelector('.split').getBoundingClientRect(), move = m => { split = Math.max(15, Math.min(80, (m.clientY - box.top) / box.height * 100)); top.style.flex = `0 0 ${split}%`; update(); };
+    e.target.setPointerCapture(e.pointerId); e.target.onpointermove = move; e.target.onpointerup = () => { e.target.onpointermove = null; try { localStorage.setItem('split', split); } catch { /* ignore */ } };
+  } });
+  el.append(h('div', { class: 'filterbar', id: 'scanquick' }), bar,
+    h('div', { class: 'split' }, top, divider,
+      h('div', { class: 'pane' }, h('div', { class: 'panetabs', id: 'panetabs' }),
+        h('div', { class: 'panebody' }, h('canvas', { id: 'scanspec', onclick: spectrumClick }), h('div', { id: 'details' })))),
+    h('div', { class: 'statusbar', id: 'scanstatus' }));
   update(); details(S.selected);
+}
+let pane = 'spectrum', split = 42;
+try { split = +localStorage.getItem('split') || 42; } catch { /* ignore */ }
+function paneTabs() {
+  $('#panetabs').replaceChildren(...[['details', 'Network Details'], ['spectrum', 'Spectrum'], ['advanced', 'Advanced Details']].map(([k, l]) =>
+    h('button', { class: k === pane ? 'on' : '', onclick: () => { pane = k; update(); details(S.selected); } }, l)));
+  $('#scanspec').style.display = pane === 'spectrum' ? 'block' : 'none';
+  const d = $('#details'); d.style.display = pane === 'spectrum' ? 'none' : 'block'; d.dataset.mode = pane;
 }
 
 function columnMenu(btn) {
@@ -102,6 +121,13 @@ function columnMenu(btn) {
 
 export function update() {
   if (!root?.isConnected) return;
+  if (!root.querySelector('.menu')) $('#scanquick').replaceChildren(quickBar());
+  paneTabs();
+  if (pane === 'spectrum') drawSpectrum($('#scanspec'), visible(), S.quick.band);
+  const total = nets().length, vis = visible().length, st = S.status;
+  $('#scanstatus').replaceChildren(h('span', {}, `Networks found: ${total}, displayed: ${vis} (${total ? Math.round(vis / total * 100) : 0}%)`),
+    h('span', {}, S.loaded ? `Viewing saved data: ${S.loaded.name}` : st.paused ? 'Scanning paused' : `Scanning: ${st.adapter || st.label || ''}`),
+    h('span', {}, S.loaded ? '' : S.conn ? `Connected to ${S.conn.ssid}` : 'Not associated (WiFi scanning does not need a WiFi connection)'));
   const cols = active(), rs = rows(), t = th();
   $('#filter').classList.toggle('err', !!S.filterError);
   $('#filter').title = S.filterError || '';
@@ -123,7 +149,7 @@ export function update() {
     nets().length ? 'No networks match the filter.' : 'Scanning… networks appear here within a few seconds.'))));
   if (S.selected && shown !== S.selected) details(S.selected);
 }
-export const onSelect = b => { update(); details(b); };
+export const onSelect = b => { update(); details(b); root?.querySelector('#nettable tr.sel')?.scrollIntoView({ block: 'nearest' }); };
 export const onAnalysis = update;
 
 // ---- details panel: summary + raw tagged parameters
@@ -136,15 +162,17 @@ async function details(bssid) {
   const box = $('#details'); if (!box) return;
   shown = bssid;
   let n = nets().find(x => x.bssid === bssid);
-  if (!n) return box.replaceChildren(h('p', { class: 'dim' }, 'Select a network to inspect its details and raw tagged parameters (information elements).'));
+  if (!n) return box.replaceChildren(h('p', { class: 'dim', style: 'padding:14px' }, 'Select a network in the table or the spectrum to see its details here.'));
   if (!S.loaded) { const full = await api('/api/network?bssid=' + bssid); if (shown !== bssid) return; if (full.bssid) n = { ...n, ...full, threat: n.threat, distance: n.distance }; }
   const t = S.threats?.aps.find(x => x.bssid === bssid), hs = hist(bssid);
   const dl = (pairs) => h('dl', {}, pairs.filter(p => p[1] != null && p[1] !== '').flatMap(([a, b]) => [h('dt', {}, a), h('dd', {}, String(b))]));
   box.replaceChildren(
-    h('div', { class: 'row' }, h('h2', { class: 'grow', style: 'margin:0' }, h('span', { class: 'chip', style: `background:${color(bssid)}` }), n.ssid || '(hidden)'),
+    h('div', { class: 'row' }, h('h2', { style: 'margin:0' }, h('span', { class: 'chip', style: `background:${color(bssid)}` }), n.ssid || '(hidden)'),
+      h('span', { class: 'dim' }, `${n.bssid} · ${n.band} GHz ch ${n.channel} @ ${n.width} MHz`),
       h('button', { class: 'small', title: 'Track this access point’s signal to find it physically', onclick: () => window.sursumGo('threats', { locate: bssid }) }, 'Locate')),
+    h('div', { class: 'sumpart' },
     t && t.cls !== 'unclassified' ? h('p', {}, h('b', { class: 'sev-' + t.severity }, t.label), ' ', h('span', { class: 'dim' }, t.reasons.join(' '))) : null,
-    h('h3', {}, 'Radio'),
+    h('div', { class: 'cols' }, h('div', {}, h('h3', {}, 'Radio'),
     dl([['BSSID', n.bssid], ['Vendor', n.vendor], ['AP name', n.ap_name], ['Model', n.model], ['Signal', `${n.rssi} dBm (${n.quality}%)`],
       ['Seen range', hs.length ? `${Math.min(...hs.map(x => x[1]))} to ${Math.max(...hs.map(x => x[1]))} dBm` : null],
       ['Noise / SNR', n.noise != null ? `${n.noise} dBm / ${n.snr} dB` : 'Not reported by this adapter'],
@@ -154,15 +182,18 @@ async function details(bssid) {
       ['Standard', `${n.generation} (802.11 ${(n.standards || []).join('/')})`], ['Streams / max rate', `${n.streams ?? '?'} × / ${n.max_rate} Mbps`],
       ['Stations', n.stations], ['Channel utilization', n.utilization != null ? n.utilization + ' %' : null],
       ['Co / adjacent-channel', `${n.cci ?? 0} / ${n.aci ?? 0} networks`], ['AP uptime', duration(n.uptime)],
-      ['Beacon / DTIM', `${n.beacon_interval} TU / ${n.dtim ?? '?'}`], ['Country', n.country], ['Tx power', n.tx_power != null ? n.tx_power + ' dBm' : null]]),
-    h('h3', {}, 'Security'),
+      ['Beacon / DTIM', `${n.beacon_interval} TU / ${n.dtim ?? '?'}`], ['Country', n.country], ['Tx power', n.tx_power != null ? n.tx_power + ' dBm' : null]])),
+    h('div', {}, h('h3', {}, 'Security'),
     dl([['Security', n.security], ['Authentication', list(n.akm)], ['Pairwise ciphers', list(n.ciphers)], ['Group cipher', n.group_cipher],
       ['Management frame protection', n.pmf], ['WPS', n.wps ? (n.wps_locked ? 'Enabled (locked)' : 'Enabled') : 'Off'],
       ['Capabilities', list(n.cap_flags)],
-      ['Features', [n.k && '802.11k', n.v && '802.11v', n.r && '802.11r', n.wmm && 'WMM', n.mu_mimo && 'MU-MIMO', n.beamforming && 'Beamforming', n.twt && 'TWT', n.mlo && 'Multi-Link', n.hotspot2 && 'Hotspot 2.0'].filter(Boolean).join(', ')]]),
-    h('h3', {}, `Tagged parameters (${(n.ies || []).length})`),
-    (n.ies || []).length ? (n.ies || []).map(e => h('details', { class: 'ie' },
-      h('summary', {}, h('b', {}, e.name), h('span', { class: 'dim' }, `  tag ${e.id}${e.ext != null ? '/' + e.ext : ''} · ${e.len} bytes`)),
-      h('div', { html: decoded(e.decoded) }), h('code', {}, e.hex)))
-      : h('p', { class: 'dim' }, n.ie_note || 'No raw elements available for this entry.'));
+      ['Features', [n.k && '802.11k', n.v && '802.11v', n.r && '802.11r', n.wmm && 'WMM', n.mu_mimo && 'MU-MIMO', n.beamforming && 'Beamforming', n.twt && 'TWT', n.mlo && 'Multi-Link', n.hotspot2 && 'Hotspot 2.0'].filter(Boolean).join(', ')]])))),
+    h('div', { class: 'iepart' }, (n.ies || []).length ? h('div', { class: 'tablewrap' }, h('table', { class: 'ietable' },
+      h('thead', {}, h('tr', {}, ['ID', 'Length', 'Information Element', 'Details'].map(x => h('th', {}, x)))),
+      h('tbody', {}, (n.ies || []).flatMap(e => {
+        const sum = Object.entries(e.decoded).filter(([, v]) => v !== null && v !== '' && typeof v !== 'object').slice(0, 4).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join(', ');
+        const more = h('tr', { class: 'iemore', hidden: true }, h('td', { colspan: 4 }, h('div', { html: decoded(e.decoded) }), h('code', { class: 'hex' }, e.hex)));
+        return [h('tr', { style: 'cursor:pointer', onclick: () => { more.hidden = !more.hidden; } }, h('td', { class: 'num' }, e.ext != null ? `${e.id} / ${e.ext}` : e.id), h('td', { class: 'num' }, `${e.len} bytes`), h('td', {}, '▸ ', h('b', {}, e.name)), h('td', { class: 'wrap dim' }, sum)), more];
+      }))))
+      : h('p', { class: 'dim' }, n.ie_note || 'No raw elements available for this entry.')));
 }

@@ -9,6 +9,7 @@ export const S = {
   loaded: null,         // {name, networks, history, connection} when viewing a saved session / capture
   selected: null,       // bssid
   filterText: '', filter: () => true, filterError: null,
+  quick: { band: 'all', sec: 'all', ssids: null },   // quick filters: band, open/secure, chosen network names
   threats: null, notes: [], ai: {}, aiRunning: false,
   devices: [], devStatus: {}, deviceTypes: [],
   tab: 'scan',
@@ -18,7 +19,12 @@ export const on = (ev, fn) => (subs[ev] ||= []).push(fn);
 export const emit = (ev, arg) => (subs[ev] || []).forEach(f => f(arg));
 
 export const nets = () => (S.loaded ? S.loaded.networks : S.live);
-export const visible = () => nets().filter(S.filter);
+const OPEN = n => n.security === 'Open' || n.security.startsWith('Enhanced Open');
+export const quickMatch = n => (S.quick.band === 'all' || n.band === S.quick.band)
+  && (S.quick.sec === 'all' || (S.quick.sec === 'open') === OPEN(n))
+  && (!S.quick.ssids || S.quick.ssids.has(n.ssid || ''));
+export const visible = () => nets().filter(n => quickMatch(n) && S.filter(n));
+export function setQuick(patch) { Object.assign(S.quick, patch); emit('data'); }
 export const hist = b => (S.loaded ? S.loaded.history?.[b] : S.history[b]) || [];
 export const th = () => S.settings?.thresholds || { good: -60, fair: -70, poor: -80 };
 export const conn = () => (S.loaded ? S.loaded.connection : S.conn);

@@ -164,6 +164,7 @@ NETS = [
 class SimulatedScanner:
     name = "demo"
     label = "Demo (simulated environment)"
+    adapter = "Simulated adapter"
 
     def __init__(self, seed: int = 7):
         self.rng = random.Random(seed)

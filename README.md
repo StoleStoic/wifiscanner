@@ -32,7 +32,7 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 
 | Tab | Contents |
 | --- | --- |
-| Scan | 55 columns per access point (signal, channel, width, vendor, security, stations, AP uptime, …), freeform filter with saved filters, CSV export, copy for Excel, and the raw tagged parameters of each beacon. |
+| Scan | Network table with quick filters (All / 2.4 / 5 / 6 GHz, Open / Secure, and a picker for specific network names), a freeform filter with saved filters, CSV export and copy for Excel. The lower pane shows Network Details, a Spectrum of all bands with the selected network highlighted, or Advanced Details (every tagged parameter of the beacon). WiFi scanning works whether or not the PC is connected to WiFi, including on Ethernet. |
 | Spectrum | 2.4, 5 and 6 GHz spectrum with primary channel markers for 20/40/80/160/320 MHz channels; co-channel and adjacent-channel interference charts. |
 | Signal | Signal vs. time, and a signal ranking with adjustable thresholds, for any band or the band your PC is on. |
 | Threats | Rogue AP, unauthorized AP, rogue client, accidental association and neighbor classification; threat vector map; authorized inventory import/export; a locator that tracks one BSSID so you can walk to it. |

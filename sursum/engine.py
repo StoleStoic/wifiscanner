@@ -186,4 +186,5 @@ class Engine:
 
     def status(self) -> dict:
         return {"source": self.source, "label": self.source_label, "error": self.error, "paused": self.paused,
-                "scans": self.scans, "last_scan": self.last_scan, "count": len(self.networks)}
+                "scans": self.scans, "last_scan": self.last_scan, "count": len(self.networks),
+                "adapter": getattr(self._scanner, "adapter", "") or ""}

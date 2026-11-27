@@ -1,73 +1,94 @@
 // Spectrum, interference, signal-vs-time and signal-rank views.
 import { $, h, canvas, color, INK, SIG, sigClass, sel } from './util.js';
-import { S, visible, th, hist, select, conn, saveSettings } from './state.js';
+import { S, nets, visible, th, hist, select, conn, saveSettings, setQuick } from './state.js';
 
-const BANDS = {
-  '2.4': { segs: [[2400, 2496]], chans: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], f: c => (c === 14 ? 2484 : 2407 + 5 * c), label: () => true },
-  '5': { segs: [[5160, 5340], [5480, 5905]], f: c => 5000 + 5 * c, label: () => true,
-    chans: [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165, 169, 173, 177] },
-  '6': { segs: [[5945, 7125]], f: c => 5950 + 5 * c, label: c => (c - 1) % 16 === 0,
-    chans: Array.from({ length: 59 }, (_, i) => 1 + 4 * i) },
+const range = (a, b, step) => Array.from({ length: Math.floor((b - a) / step) + 1 }, (_, i) => a + i * step);
+// Axis segments. k stretches a segment relative to its width in MHz (2.4 GHz is narrow but crowded).
+const SEG = {
+  '2.4': { lo: 2400, hi: 2496, name: 'ISM 2.4 GHz', chans: range(1, 14, 1), f: c => (c === 14 ? 2484 : 2407 + 5 * c), every: 1 },
+  '5a': { lo: 5160, hi: 5340, name: 'UNII-1 / 2A', chans: range(36, 64, 4), f: c => 5000 + 5 * c, every: 1 },
+  '5b': { lo: 5480, hi: 5905, name: 'UNII-2C / 3 / 4', chans: [...range(100, 144, 4), ...range(149, 177, 4)], f: c => 5000 + 5 * c, every: 1 },
+  '6': { lo: 5945, hi: 7125, name: 'UNII-5 to 8 (6 GHz)', chans: range(1, 233, 4), f: c => 5950 + 5 * c, every: 4 },
 };
-let band = '2.4', root;
-const PAD = { l: 44, r: 12, t: 18, b: 34 }, GAP = 26;
+const VIEWS = { '2.4': [['2.4', 1]], '5': [['5a', 1], ['5b', 1]], '6': [['6', 1]], all: [['2.4', 5], ['5a', 1.3], ['5b', 1.3], ['6', 0.55]] };
+export const BANDS = { '2.4': { chans: SEG['2.4'].chans, f: SEG['2.4'].f }, '5': { chans: [...SEG['5a'].chans, ...SEG['5b'].chans], f: SEG['5a'].f }, '6': { chans: SEG['6'].chans, f: SEG['6'].f } };
+let root;
+const PAD = { l: 44, r: 44, t: 30, b: 50 }, GAP = 22;
+const DARK = { bg: '#0b0f26', grid: 'rgba(255,255,255,.10)', axis: '#8fa0c8', text: '#e6ebff', band: '#5aa9f5' };
+const hue = b => { let x = 0; for (const c of b) x = (x * 31 + c.charCodeAt(0)) >>> 0; return (x * 137.508) % 360; };
+const tint = (b, a = 1, l = 62) => `hsla(${hue(b)}, 85%, ${l}%, ${a})`;
+const yOf = (rssi, hgt, pad = PAD) => pad.t + (Math.min(-10, Math.max(-100, rssi)) + 10) / -90 * (hgt - pad.t - pad.b);
+export const shortName = n => n.ssid || `${(n.vendor || 'Hidden').replace(/^Private.*?(possibly |$)/, '').replace(/\(virtual\)|[,.]? ?(Inc|Corp|LLC|Ltd|Co|GmbH|Technologies|Networks|Systems|COMPUTER|Solutions).*$/gi, '').trim() || 'Hidden'}:${n.bssid.slice(9).toUpperCase()}`;
 
-function scale(b, w) {
-  const segs = BANDS[b].segs, total = segs.reduce((a, s) => a + s[1] - s[0], 0);
-  const px = (w - PAD.l - PAD.r - GAP * (segs.length - 1)) / total;
-  return f => {
-    let x = PAD.l;
-    for (const [lo, hi] of segs) {
-      if (f <= hi) return x + (Math.max(lo, f) - lo) * px;
-      x += (hi - lo) * px + GAP;
-    }
-    return w - PAD.r;
-  };
-}
-const yOf = (rssi, hgt) => PAD.t + (Math.min(-20, Math.max(-100, rssi)) + 20) / -80 * (hgt - PAD.t - PAD.b);
-
-function drawSpectrum(cv, list) {
-  const { ctx, w, h: hgt } = canvas(cv), x = scale(band, w), B = BANDS[band], base = hgt - PAD.b;
-  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  for (let d = -100; d <= -20; d += 10) {
-    ctx.strokeStyle = INK.grid; ctx.beginPath(); ctx.moveTo(PAD.l, yOf(d, hgt)); ctx.lineTo(w - PAD.r, yOf(d, hgt)); ctx.stroke();
-    ctx.fillStyle = INK.axis; ctx.fillText(d, PAD.l - 6, yOf(d, hgt));
+// Draws the spectrum on a dark canvas. view: 'all' | '2.4' | '5' | '6'. The selected network is drawn solid.
+export function drawSpectrum(cv, list, view) {
+  const { ctx, w, h: hgt } = canvas(cv), base = hgt - PAD.b;
+  let segs = VIEWS[view] || VIEWS.all;
+  if (view === 'all' && !list.some(n => n.band === '6')) segs = segs.filter(s => s[0] !== '6');  // adapter hears no 6 GHz
+  const total = segs.reduce((a, [k, m]) => a + (SEG[k].hi - SEG[k].lo) * m, 0), px = (w - PAD.l - PAD.r - GAP * (segs.length - 1)) / total;
+  const start = {}; let cur = PAD.l;
+  for (const [k, m] of segs) { start[k] = [cur, px * m]; cur += (SEG[k].hi - SEG[k].lo) * px * m + GAP; }
+  const x = f => { for (const [k] of segs) if (f <= SEG[k].hi + 1) return start[k][0] + (Math.max(SEG[k].lo, f) - SEG[k].lo) * start[k][1]; return w - PAD.r; };
+  const inView = n => segs.some(([k]) => n.freq >= SEG[k].lo && n.freq <= SEG[k].hi);
+  ctx.fillStyle = DARK.bg; ctx.fillRect(0, 0, w, hgt);
+  ctx.textBaseline = 'middle'; ctx.setLineDash([3, 4]);
+  for (let d = -10; d >= -90; d -= 10) {
+    ctx.strokeStyle = DARK.grid; ctx.beginPath(); ctx.moveTo(PAD.l, yOf(d, hgt)); ctx.lineTo(w - PAD.r, yOf(d, hgt)); ctx.stroke();
+    ctx.fillStyle = d <= -80 ? '#ef5b5b' : d >= -60 ? '#3ecf8e' : DARK.axis; ctx.textAlign = 'right'; ctx.fillText(d, PAD.l - 8, yOf(d, hgt)); ctx.textAlign = 'left'; ctx.fillText(d, w - PAD.r + 8, yOf(d, hgt));
   }
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  for (const c of B.chans) {
-    const cx = x(B.f(c));
-    ctx.strokeStyle = INK.grid; ctx.beginPath(); ctx.moveTo(cx, base); ctx.lineTo(cx, base + 4); ctx.stroke();
-    if (B.label(c)) { ctx.fillStyle = INK.axis; ctx.fillText(c, cx, base + 6); }
+  ctx.setLineDash([]);
+  const sel = list.find(n => n.bssid === S.selected && inView(n));
+  ctx.textAlign = 'center';
+  for (const [k] of segs) {
+    const g = SEG[k], x0 = start[k][0], x1 = x0 + (g.hi - g.lo) * start[k][1];
+    ctx.strokeStyle = k === '2.4' ? '#f0913a' : DARK.band; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, PAD.t - 8); ctx.lineTo(x1, PAD.t - 8); ctx.stroke(); ctx.lineWidth = 1;
+    ctx.fillStyle = DARK.text; ctx.font = 'bold 11px system-ui'; ctx.textBaseline = 'bottom'; ctx.fillText(g.name, (x0 + x1) / 2, PAD.t - 11); ctx.font = '11px system-ui';
+    ctx.strokeStyle = DARK.axis; ctx.beginPath(); ctx.moveTo(x0, base); ctx.lineTo(x1, base); ctx.stroke();
+    ctx.textBaseline = 'top';
+    const step = Math.max(1, Math.ceil(26 / ((g.f(g.chans[1]) - g.f(g.chans[0])) * start[k][1])));
+    g.chans.forEach((c, i) => {
+      const hot = sel && sel.channel === c && sel.freq === g.f(c);
+      if (i % step && !hot) return;
+      ctx.fillStyle = hot ? '#ffd166' : k === '2.4' && [1, 6, 11].includes(c) ? '#f0913a' : DARK.axis; ctx.font = hot ? 'bold 13px system-ui' : '11px system-ui';
+      ctx.fillText(c, x(g.f(c)), base + 7);
+    });
+    ctx.font = '11px system-ui';
   }
-  ctx.fillStyle = INK.dim; ctx.fillText('Channel', (PAD.l + w - PAD.r) / 2, base + 20);
-  ctx.save(); ctx.translate(11, hgt / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('dBm', 0, 0); ctx.restore();
-  const labels = [];
-  for (const n of [...list].sort((a, b) => a.rssi - b.rssi)) {
-    const lo = x(n.span_lo), hi = x(n.span_hi), top = yOf(n.rssi, hgt), slope = Math.min(8, (hi - lo) * 0.12), selected = n.bssid === S.selected;
-    ctx.beginPath(); ctx.moveTo(lo, base); ctx.lineTo(lo + slope, top); ctx.lineTo(hi - slope, top); ctx.lineTo(hi, base);
-    ctx.fillStyle = color(n.bssid, selected ? 0.38 : 0.14); ctx.fill();
-    ctx.strokeStyle = color(n.bssid); ctx.lineWidth = selected || n.connected ? 2.5 : 1.2; ctx.stroke();
-    if (n.width > 20) {  // primary 20 MHz inside a bonded channel
-      const pl = Math.max(lo + slope, x(n.freq - 10)), ph = Math.min(hi - slope, x(n.freq + 10));
-      ctx.fillStyle = color(n.bssid, 0.3); ctx.fillRect(pl, top, ph - pl, base - top);
-    }
-    ctx.fillStyle = color(n.bssid); ctx.fillRect(x(n.freq) - 1, top - 4, 2, 4);
-    labels.push({ n, cx: (lo + hi) / 2, top });
+  const shown = list.filter(inView).sort((a, b) => a.rssi - b.rssi), hits = [];
+  const shape = n => { const lo = x(n.span_lo), hi = x(n.span_hi), top = yOf(n.rssi, hgt), sl = Math.min(6, (hi - lo) * 0.1); ctx.beginPath(); ctx.moveTo(lo, base); ctx.lineTo(lo + sl, top); ctx.lineTo(hi - sl, top); ctx.lineTo(hi, base); return { lo, hi, top, sl }; };
+  for (const n of shown) {
+    if (n === sel) continue;
+    const g = shape(n), dim = sel ? 0.45 : 1;
+    ctx.fillStyle = tint(n.bssid, 0.10 * dim); ctx.fill(); ctx.strokeStyle = tint(n.bssid, 0.95 * dim); ctx.lineWidth = n.connected ? 2.4 : 1.3; ctx.stroke();
+    if (n.width > 20) { ctx.fillStyle = tint(n.bssid, 0.16 * dim); ctx.fillRect(Math.max(g.lo + g.sl, x(n.freq - 10)), g.top, Math.min(g.hi - g.sl, x(n.freq + 10)) - Math.max(g.lo + g.sl, x(n.freq - 10)), base - g.top); }
+    hits.push({ n, ...g });
   }
-  ctx.lineWidth = 1; ctx.textBaseline = 'bottom';
+  ctx.lineWidth = 1; ctx.textBaseline = 'bottom'; ctx.textAlign = 'center'; ctx.font = '13px system-ui';
   const used = [];
-  for (const { n, cx, top } of labels.reverse()) {
-    const txt = `${n.ssid || '(hidden)'} · ${n.channel}${n.width > 20 ? '/' + n.width : ''}`, tw = ctx.measureText(txt).width;
-    let y = top - 6;
-    while (used.some(u => Math.abs(u.y - y) < 12 && Math.abs(u.cx - cx) < (u.tw + tw) / 2 + 6) && y > PAD.t + 10) y -= 12;
-    used.push({ cx, y, tw });
-    ctx.fillStyle = color(n.bssid); ctx.fillText(txt, Math.max(PAD.l + tw / 2, Math.min(w - PAD.r - tw / 2, cx)), y);
+  for (const { n, lo, hi, top } of [...hits].reverse()) {
+    const txt = shortName(n), tw = ctx.measureText(txt).width, cx = Math.max(PAD.l + tw / 2, Math.min(w - PAD.r - tw / 2, (lo + hi) / 2));
+    let y = top - 5; while (used.some(u => Math.abs(u.y - y) < 14 && Math.abs(u.cx - cx) < (u.tw + tw) / 2 + 4) && y > Math.max(PAD.t + 16, top - 5 - 14 * 4)) y -= 14;
+    used.push({ cx, y, tw }); ctx.fillStyle = tint(n.bssid, sel ? 0.5 : 0.95, 68); ctx.fillText(txt, cx, y);
   }
-  cv._hit = (mx, my) => labels.filter(({ n }) => mx >= x(n.span_lo) && mx <= x(n.span_hi) && my >= yOf(n.rssi, hgt) - 4 && my <= base)
-    .sort((a, b) => a.n.rssi - b.n.rssi)[0]?.n;
+  if (sel) {  // the selected network: solid, on top, with a boxed label and a caption
+    const g = shape(sel);
+    ctx.fillStyle = tint(sel.bssid, 0.88, 52); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
+    if (sel.width > 20) { ctx.fillStyle = 'rgba(255,255,255,.28)'; ctx.fillRect(x(sel.freq - 10), g.top, x(sel.freq + 10) - x(sel.freq - 10), base - g.top); }
+    ctx.font = 'bold 15px system-ui'; const txt = shortName(sel), tw = ctx.measureText(txt).width + 22, cx = Math.max(PAD.l + tw / 2, Math.min(w - PAD.r - tw / 2, (g.lo + g.hi) / 2)), by = Math.max(PAD.t + 4, g.top - 44);
+    ctx.fillStyle = 'rgba(11,15,38,.92)'; ctx.strokeStyle = tint(sel.bssid, 1, 62); ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(cx - tw / 2, by, tw, 30, 6); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(txt, cx, by + 16);
+    ctx.font = '13px system-ui'; ctx.textAlign = 'left'; ctx.fillStyle = DARK.text;
+    ctx.fillText(`${shortName(sel)}  ·  ${sel.bssid}  ·  Ch. ${sel.channel} @ ${sel.width} MHz  ·  ${sel.rssi} dBm  ·  ${sel.security}`, PAD.l, hgt - 12);
+    hits.push({ n: sel, ...g });
+  } else { ctx.font = '12px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = DARK.axis; ctx.fillText(shown.length ? 'Click a network to highlight it.' : 'No networks in this view.', PAD.l, hgt - 12); }
+  ctx.font = '11px system-ui';
+  cv._hit = (mx, my) => hits.filter(g => mx >= g.lo && mx <= g.hi && my >= g.top - 4 && my <= base).sort((a, b) => (b.n === sel) - (a.n === sel) || a.n.rssi - b.n.rssi).find(g => g.n !== sel)?.n
+    || hits.find(g => g.n === sel && mx >= g.lo && mx <= g.hi && my >= g.top - 4 && my <= base)?.n;
 }
+export const spectrumClick = e => { const r = e.target.getBoundingClientRect(), n = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); select(n ? n.bssid : null); };
 
 function bars(cv, labels, values, mine, title, col) {
+  const PAD = { l: 44, r: 12, t: 18, b: 34 };
   const { ctx, w, h: hgt } = canvas(cv), max = Math.max(4, ...values), bw = (w - PAD.l - PAD.r) / labels.length, base = hgt - PAD.b;
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   for (let i = 0; i <= 4; i++) {
@@ -89,32 +110,55 @@ function bars(cv, labels, values, mine, title, col) {
 export const spectrum = {
   mount(el) {
     root = el;
-    if (conn()?.band && !spectrum._picked) band = conn().band;
     el.append(
-      h('div', { class: 'row', style: 'margin-bottom:10px' },
-        h('div', { class: 'seg', id: 'bandseg' }), h('span', { class: 'dim', id: 'speccount' }),
-        h('span', { class: 'dim grow', style: 'text-align:right' }, 'Shape width = channel width; darker block and tick = primary channel. Uses the Scan tab filter. Click a network to select it.')),
-      h('div', { class: 'card' }, h('canvas', { class: 'chart', id: 'spec', onclick: e => { const r = e.target.getBoundingClientRect(), n = e.target._hit?.(e.clientX - r.left, e.clientY - r.top); if (n) select(n.bssid); } })),
+      h('div', { class: 'row', style: 'margin-bottom:10px' }, h('span', { id: 'specquick' }),
+        h('span', { class: 'dim grow', style: 'text-align:right' }, 'Shape width = channel width; lighter block = primary channel. Click a network to highlight it; click empty space to clear.')),
+      h('div', { class: 'card', style: 'padding:0;overflow:hidden' }, h('canvas', { class: 'chart', id: 'spec', style: 'height:430px', onclick: spectrumClick })),
       h('div', { class: 'grid2' },
-        h('div', { class: 'card' }, h('h2', {}, 'Co-channel interference'), h('p', { class: 'dim' }, 'Networks sharing each primary channel. They take turns, so airtime is divided.'), h('canvas', { class: 'chart short', id: 'cci' })),
-        h('div', { class: 'card' }, h('h2', {}, 'Adjacent-channel interference'), h('p', { class: 'dim' }, 'Networks that partly overlap each channel from a different primary. They cannot coordinate and corrupt each other.'), h('canvas', { class: 'chart short', id: 'aci' }))));
+        h('div', { class: 'card' }, h('h2', { id: 'ccih' }, 'Co-channel interference'), h('p', { class: 'dim' }, 'Networks sharing each primary channel. They take turns, so airtime is divided.'), h('canvas', { class: 'chart short', id: 'cci' })),
+        h('div', { class: 'card' }, h('h2', { id: 'acih' }, 'Adjacent-channel interference'), h('p', { class: 'dim' }, 'Networks that partly overlap each channel from a different primary. They cannot coordinate and corrupt each other.'), h('canvas', { class: 'chart short', id: 'aci' }))));
     this.update();
   },
   update() {
     if (!root?.isConnected || !$('#spec')) return;
-    const all = visible(), list = all.filter(n => n.band === band);
-    $('#bandseg').replaceChildren(...['2.4', '5', '6'].map(b => h('button', { class: b === band ? 'on' : '', onclick: () => { band = b; spectrum._picked = true; this.update(); } },
-      `${b} GHz (${all.filter(n => n.band === b).length})`)));
-    $('#speccount').textContent = list.length ? '' : `No ${band} GHz networks in view` + (band === '6' ? ' (needs a WiFi 6E/7 adapter).' : '.');
-    drawSpectrum($('#spec'), list);
-    const B = BANDS[band], mine = new Set(list.filter(n => n.threat === 'authorized' || n.connected).map(n => n.channel));
-    const co = B.chans.map(c => list.filter(n => n.channel === c).length);
-    const adj = B.chans.map(c => { const f = B.f(c); return list.filter(n => n.channel !== c && n.span_lo < f + 10 && f - 10 < n.span_hi).length; });
+    const list = visible(), view = S.quick.band;
+    $('#specquick').replaceChildren(quickBar());
+    drawSpectrum($('#spec'), list, view);
+    const b = view !== 'all' ? view : (list.find(n => n.bssid === S.selected)?.band || conn()?.band || '2.4'), B = BANDS[b], inBand = list.filter(n => n.band === b);
+    const mine = new Set(inBand.filter(n => n.threat === 'authorized' || n.connected).map(n => n.channel));
+    const co = B.chans.map(c => inBand.filter(n => n.channel === c).length);
+    const adj = B.chans.map(c => { const f = B.f(c); return inBand.filter(n => n.channel !== c && n.span_lo < f + 10 && f - 10 < n.span_hi).length; });
+    $('#ccih').textContent = `Co-channel interference — ${b} GHz`; $('#acih').textContent = `Adjacent-channel interference — ${b} GHz`;
     bars($('#cci'), B.chans, co, mine, 'Access points per primary channel (green = yours)', '#5aa9f5');
     bars($('#aci'), B.chans, adj, mine, 'Overlapping access points per channel', '#f0913a');
   },
   onSelect() { this.update(); }, onAnalysis() { this.update(); },
 };
+
+// Quick filter bar shared by the Scan and Spectrum tabs: band, open/secure and a network-name picker.
+export function quickBar() {
+  const all = nets(), q = S.quick, count = f => all.filter(f).length;
+  const seg = (items, key) => h('div', { class: 'seg' }, items.map(([v, l, f]) => h('button', { class: q[key] === v ? 'on' : '', onclick: () => setQuick({ [key]: v }) }, `${l} (${count(f)})`)));
+  const open = n => n.security === 'Open' || n.security.startsWith('Enhanced Open');
+  const names = [...new Set(all.map(n => n.ssid || ''))].sort((a, b) => a.localeCompare(b));
+  return h('span', { class: 'row' },
+    seg([['all', 'All', () => true], ['2.4', '2.4 GHz', n => n.band === '2.4'], ['5', '5 GHz', n => n.band === '5'], ['6', '6 GHz', n => n.band === '6']], 'band'),
+    seg([['all', 'Any security', () => true], ['open', 'Open', open], ['secure', 'Secure', n => !open(n)]], 'sec'),
+    h('button', { class: q.ssids ? 'primary' : '', title: 'Show only the network names you tick', onclick: e => namePicker(e.currentTarget, names) }, q.ssids ? `Networks: ${q.ssids.size} of ${names.length} ▾` : 'Networks: all ▾'));
+}
+function namePicker(btn, names) {
+  if ($('.menu')) return $('.menu').remove();
+  const all = nets(), chosen = new Set(S.quick.ssids || names);
+  const apply = () => setQuick({ ssids: chosen.size === names.length ? null : new Set(chosen) });
+  const box = h('div', { class: 'menu', style: 'columns:auto;min-width:260px' },
+    h('div', { class: 'row', style: 'margin-bottom:6px' }, h('button', { class: 'small', onclick: () => { names.forEach(n => chosen.add(n)); apply(); m(); } }, 'All'), h('button', { class: 'small', onclick: () => { chosen.clear(); apply(); m(); } }, 'None'),
+      h('button', { class: 'small', onclick: () => { chosen.clear(); all.filter(n => n.threat === 'authorized').forEach(n => chosen.add(n.ssid || '')); apply(); m(); } }, 'Only mine')),
+    h('div', { id: 'namelist' }));
+  const m = () => $('#namelist').replaceChildren(...names.map(n => h('label', {}, h('input', { type: 'checkbox', checked: chosen.has(n), onchange: e => { e.target.checked ? chosen.add(n) : chosen.delete(n); apply(); } }), ` ${n || '(hidden networks)'} `, h('span', { class: 'dim' }, `(${all.filter(x => (x.ssid || '') === n).length})`))));
+  const r = btn.getBoundingClientRect(); box.style.top = r.bottom + 4 + 'px'; box.style.left = Math.min(r.left, innerWidth - 300) + 'px';
+  document.body.append(box); m();
+  setTimeout(() => document.addEventListener('pointerdown', function f(e) { if (!box.contains(e.target) && e.target !== btn) { box.remove(); document.removeEventListener('pointerdown', f); } }), 0);
+}
 
 // ---- signal vs time + rank
 let sameBand = false, windowSec = 300;

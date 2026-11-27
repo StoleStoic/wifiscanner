@@ -97,6 +97,7 @@ class WindowsScanner:
 
     def __init__(self, scan_wait: float = 3.5, interface: str | None = None):
         self.scan_wait = scan_wait
+        self.adapter = ""
         self.interface = interface
         try:
             self._api = ctypes.WinDLL("wlanapi.dll")  # type: ignore[attr-defined]
@@ -179,7 +180,8 @@ class WindowsScanner:
 
     def scan(self) -> tuple[list[dict], dict | None]:
         guid, desc, _state = self._pick()
-        self._api.WlanScan(self._handle, byref(guid), None, None, None)  # busy/denied is non-fatal
+        self.adapter = desc
+        scan_rc = self._api.WlanScan(self._handle, byref(guid), None, None, None)  # busy is non-fatal
         time.sleep(self.scan_wait)
         plist = POINTER(WLAN_BSS_LIST)()
         rc = self._api.WlanGetNetworkBssList(self._handle, byref(guid), None, 3, 0, None, byref(plist))
@@ -189,6 +191,11 @@ class WindowsScanner:
                             "then scanning resumes automatically.")
         if rc:
             raise ScanError(f"WlanGetNetworkBssList failed (error {rc})")
+        if scan_rc and not plist.contents.dwNumberOfItems:
+            self._api.WlanFreeMemory(plist)
+            raise ScanError(f"The WiFi adapter '{desc}' could not scan (Windows error {scan_rc}). Check that WiFi is "
+                            "switched on in Windows. It does not need to be connected to a network: scanning works "
+                            "while this PC is on Ethernet.")
         nets = []
         try:
             base = ctypes.addressof(plist.contents.wlanBssEntries)
