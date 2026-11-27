@@ -31,7 +31,7 @@ jobs:
           open("scan.pcapng", "wb").write(pcapwrite.write(nets)[0])
           print(len(nets), file=open("count.txt", "w"))
           PY
-          test "$(tshark -r scan.pcapng -Y 'wlan.fc.type_subtype==8 && radiotap.channel.freq && wlan.ssid' 2>/dev/null | wc -l)" = "$(cat count.txt)"
+          test "$(tshark -r scan.pcapng -Y 'wlan.fc.type_subtype==8 && radiotap.channel.freq && wlan.bssid' 2>/dev/null | wc -l)" = "$(cat count.txt)"
 
   windows-installer:
     needs: test
