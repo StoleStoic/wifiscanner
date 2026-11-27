@@ -39,7 +39,7 @@ security > Location, switch on *Location services* and *Let desktop apps access 
 | Analysis | Prioritised notes (Very High to Very Low) on security, connectivity, performance and configuration, each linked to a help article. Optional deeper review by Claude. |
 | Speed Test | Single, repeating, or automatic on roaming, with a choice of servers and a room label on each result. |
 | Survey | Click-where-you-stand survey on a floor plan image, passive or active, with heatmaps per SSID or BSSID, adjustable colour range, speed tests at points, and estimated access point positions. |
-| Devices | Every device seen by any scan, merged into one list: type, maker, addresses, services, the access point it uses, first and last seen. Authorize, name and categorize each one (or many at once); optional identification by Claude. |
+| Devices | Every device seen by any scan, merged into one list: type, maker, addresses, services, the access point it uses, first and last seen. Authorize, name and categorize each one (or many at once); optional identification by Claude. **Import router list** brings in the AT&T gateway's own device list (fetched from the gateway or pasted), which includes devices that are off, behind your other routers, or on a part of the network this PC cannot scan. |
 | Map | All access points and devices and what is connected to what. Right-click for options. |
 | Sessions | Save, reopen, import, download and compare scans; open pcap / pcapng captures. |
 | Settings, Help | Scan timing, home perimeter, remote probes, Claude key; filter syntax and articles. |

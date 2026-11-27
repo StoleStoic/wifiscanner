@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, ai, analysis
+from . import __version__, ai, analysis, routerlist
 from .engine import Engine, interference
 from .devices import TYPES, Registry
 from .ipscan import IPScanner
@@ -84,6 +84,25 @@ class App:
             out.append(d)
         return dict(self.ipscan.status(), devices=out, types=TYPES, identify=self.identify,
                     identify_running=self.identify_running)
+
+    def _import(self, text: str) -> dict:
+        """Merge a router's device list into the registry."""
+        devs = routerlist.parse(text)
+        if not devs:
+            return dict(self.devices(), imported={"error": "No devices were recognised in that text. Copy the whole "
+                                                           "Device List page of the AT&T gateway and paste it here."})
+        nets = self.engine.snapshot()
+        home = {d["ssid"] for d in devs if d["net_type"].lower() == "home" and d["ssid"]}
+        linked = 0
+        for d in devs:
+            ap = routerlist.resolve_ap(d, nets, home)
+            linked += bool(ap)
+            self.registry.observe(d["mac"], "router", save=False, ip=d["ip"] or None, hostname=d["name"], online=d["online"],
+                                  seen=d["seen"], conn=routerlist.describe(d), ap=ap, ap_source="router list")
+        self.registry.mark_offline("router", {d["mac"] for d in devs})
+        self.registry.save()
+        return dict(self.devices(), imported={"count": len(devs), "online": sum(d["online"] for d in devs),
+                                              "wifi": sum(d["link"] == "wifi" for d in devs), "linked": linked})
 
     def _identify(self, macs: list[str]) -> None:
         try:
@@ -175,6 +194,13 @@ class App:
                 self.registry.update(macs, data.get("patch") or {})
             elif act == "forget":
                 self.registry.forget(macs)
+            elif act in ("import", "fetch"):
+                try:
+                    text = routerlist.fetch(data.get("host") or "192.168.1.254") if act == "fetch" else str(data.get("text") or "")
+                except (OSError, ValueError) as ex:
+                    return dict(self.devices(), imported={"error": "Could not read the device list from the gateway at that "
+                                                                   f"address ({getattr(ex, 'reason', ex)}). Use option 2: copy the page and paste it."})
+                return self._import(text)
             elif act == "identify" and not self.identify_running:
                 self.identify_running = True
                 threading.Thread(target=self._identify, args=(macs,), daemon=True, name="identify").start()

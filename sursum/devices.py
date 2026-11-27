@@ -21,15 +21,15 @@ PORT_NAMES = {22: "SSH", 80: "Web page", 443: "Secure web page", 445: "Windows f
               8080: "Web page (alt)", 9100: "Printing (raw)", 62078: "iPhone / iPad sync"}
 
 _HOST = [
-    (r"iphone|ipad|android|galaxy|pixel|oneplus|redmi|huawei-|-phone", "Phone / tablet"),
-    (r"macbook|imac|mac-?mini|desktop-|laptop|thinkpad|surface|-pc\b|^pc-|win-|workstation", "Computer"),
-    (r"roku|chromecast|apple-?tv|fire-?tv|firestick|bravia|webos|shield|\btv\b|-tv|tv-", "TV / streaming"),
+    (r"fire ?tv|google ?tv|roku|hopper|joey|chromecast|apple-?tv|firestick|bravia|webos|shield|\btv\b|-tv|tv-|tv$", "TV / streaming"),
+    (r"playstation|ps[345]\b|xbox|nintendo|steamdeck", "Game console"),
+    (r"iphone|ipad|android|galaxy|pixel|oneplus|redmi|huawei-|-phone|kindle|fold\d|flip\d|-s-[as]\d\d", "Phone / tablet"),
+    (r"macbook|imac|mac-?mini|desktop-|laptop|thinkpad|surface|-pc\b|^pc-|win-|workstation|chromeos|chromebook", "Computer"),
     (r"echo|alexa|homepod|sonos|google-?home|nest-?(mini|audio|hub)|bose", "Speaker"),
     (r"printer|officejet|laserjet|deskjet|envy|epson|canon|brother|^hp[0-9a-f]{6}|^npi[0-9a-f]{6}", "Printer"),
-    (r"cam\b|camera|ring-|doorbell|wyze|arlo|reolink|blink", "Camera"),
+    (r"cam\d*\b|_cam|cam[-_]|camera|ring-|doorbell|wyze|arlo|reolink|blink", "Camera"),
     (r"plug|bulb|light|hue|kasa|tasmota|^esp[-_]|shelly|thermostat|ecobee|switch-|smart|tuya|lifx|wemo|roomba|irobot", "Smart home"),
-    (r"playstation|ps[345]\b|xbox|nintendo|steamdeck", "Game console"),
-    (r"router|gateway|\bap\b|access-?point|extender|orbi|eero|unifi|mesh|bgw\d+", "Network equipment"),
+    (r"router|gateway|\bap\b|_ap$|^ap[a-z]|access-?point|extender|orbi|eero|unifi|mesh|zenwifi|bgw\d+", "Network equipment"),
     (r"watch|fitbit|garmin", "Wearable"),
 ]
 _VENDOR = [
@@ -60,6 +60,8 @@ def guess_type(d: dict) -> tuple[str, str]:
         return "Phone / tablet", "answers on the iPhone/iPad sync port"
     if 554 in ports:
         return "Camera", "offers a video stream (RTSP)"
+    if re.search(r"dish|echostar", vendor):
+        return ("Network equipment", "Dish wireless access point") if re.search(r"_ap$|\bap\b", host) else ("TV / streaming", "Dish receiver")
     for pat, typ in _HOST:
         if host and re.search(pat, host):
             return typ, f"name '{d['hostname']}'"
@@ -111,7 +113,7 @@ class Registry:
                 "authorized": None, "vendor": oui.vendor(mac), "random_mac": oui.is_local(mac),
                 "ips": [], "hostname": "", "ports": [], "upnp": "", "ap": None, "ap_source": None,
                 "sources": [], "first_seen": now, "last_seen": now, "online": False, "self": False,
-                "gateway": False, "notes": "", "model_guess": "", "frames": 0, "rssi": None}
+                "gateway": False, "notes": "", "model_guess": "", "frames": 0, "rssi": None, "conn": ""}
         return d
 
     def observe(self, mac: str, source: str, save: bool = True, **facts: Any) -> dict:
@@ -119,7 +121,10 @@ class Registry:
         mac = oui.norm(mac)
         with self.lock:
             d = self._get(mac)
-            d["last_seen"] = facts.pop("seen", None) or time.time()
+            d.setdefault("conn", "")
+            seen = facts.pop("seen", None) or time.time()
+            d["last_seen"] = max(seen, d["last_seen"]) if len(d["sources"]) else seen
+            d["first_seen"] = min(d["first_seen"], seen)
             if source not in d["sources"]:
                 d["sources"].append(source)
             ip = facts.pop("ip", None)
@@ -129,7 +134,7 @@ class Registry:
             if ap and d["ap_source"] != "manual":
                 d["ap"], d["ap_source"] = oui.norm(ap), facts.pop("ap_source", source)
             facts.pop("ap_source", None)
-            for k in ("hostname", "upnp"):
+            for k in ("hostname", "upnp", "conn"):
                 if facts.get(k):
                     d[k] = facts[k]
             if facts.get("ports"):
@@ -209,4 +214,4 @@ class Registry:
     def lan(self) -> list[dict]:
         """Devices on the user's own network, in the shape the threat engine expects."""
         return [dict(d, ip=(d["ips"] or [""])[0], known=d["authorized"] is True)
-                for d in self.list() if "lan" in d["sources"] and d["online"]]
+                for d in self.list() if ("lan" in d["sources"] or "router" in d["sources"]) and d["online"]]

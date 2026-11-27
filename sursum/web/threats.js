@@ -46,7 +46,7 @@ function drawRadar(cv) {
     // little dots: the devices known to use this access point
     S.devices.filter(d => d.ap === t.bssid).slice(0, 14).forEach((d, i, arr) => {
       const da = a + Math.PI + (i - (arr.length - 1) / 2) * 0.5, dx = px + 15 * Math.cos(da), dy = py + 15 * Math.sin(da);
-      ctx.fillStyle = d.sources.includes('lan') || d.authorized != null ? AUTH[d.authorized][1] : '#8892a6';
+      ctx.fillStyle = d.sources.includes('lan') || d.sources.includes('router') || d.authorized != null ? AUTH[d.authorized][1] : '#8892a6';
       ctx.beginPath(); ctx.arc(dx, dy, 2.6, 0, 7); ctx.fill();
     });
     hits.push({ px, py, b: t.bssid });

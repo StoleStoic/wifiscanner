@@ -36,7 +36,7 @@ window.sursumGo = go;
 function renderTabs() {
   const c = S.threats?.counts || {};
   const alerts = (c.rogue || 0) + (c.accidental || 0) + (c.rogue_client || 0);
-  const pendingDev = S.devices.filter(d => d.authorized == null && d.sources.includes('lan')).length;
+  const pendingDev = S.devices.filter(d => d.authorized == null && (d.sources.includes('lan') || d.sources.includes('router')) && d.online).length;
   const hi = S.notes.filter(n => n.priority === 'Very High' || n.priority === 'High').length;
   $('#tabs').replaceChildren(...TABS.map(([id, label]) => h('button', { class: S.tab === id ? 'on' : '', onclick: () => go(id) }, label,
     id === 'threats' && alerts ? h('span', { class: 'badge bad' }, alerts) : null,

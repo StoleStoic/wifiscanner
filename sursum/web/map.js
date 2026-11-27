@@ -1,16 +1,16 @@
 // Map: every access point and device, and which device is connected to which access point.
 import { $, h, canvas, INK, SEV, AUTH, menu, sel } from './util.js';
 import { S, nets, select, deviceAction, threatOf } from './state.js';
-import { label } from './devices.js';
+import { label, mineDev } from './devices.js';
 
-let root, scope = 'mine', focus = null, hits = [], hover = null;
-const SOLID = ['this PC', 'capture', 'simulated'], SEVN = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
+let root, scope = 'mine', focus = null, hits = [], offlineHidden = true;
+const SOLID = ['this PC', 'capture', 'simulated', 'router list'], SEVN = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 const apColor = n => (n.threat === 'authorized' ? '#3ecf8e' : SEV[threatOf(n.bssid)?.severity] || '#8892a6');
-const devColor = d => (d.sources.includes('lan') || d.authorized != null ? AUTH[d.authorized][1] : '#8892a6');
+const devColor = d => (mineDev(d) || d.authorized != null ? AUTH[d.authorized][1] : '#8892a6');
 
 function model() {
   const all = nets(), byB = Object.fromEntries(all.map(n => [n.bssid, n]));
-  const devs = S.devices.filter(d => scope === 'all' || d.sources.includes('lan') || byB[d.ap]?.threat === 'authorized');
+  const devs = S.devices.filter(d => (scope === 'all' || mineDev(d) || byB[d.ap]?.threat === 'authorized') && (d.online || d.ap || !offlineHidden));
   const need = new Set(devs.map(d => d.ap).filter(Boolean));
   let aps = all.filter(n => n.threat === 'authorized' || need.has(n.bssid) || scope === 'all' || n.threat === 'rogue');
   for (const b of need) if (!byB[b]) aps.push({ bssid: b, ssid: 'Not in range now', band: '?', channel: '?', ghost: true });
@@ -47,7 +47,7 @@ function draw() {
         ctx.fillStyle = devColor(d); ctx.strokeStyle = focus === d.mac ? INK.text : d.self ? '#5aa9f5' : INK.bg; ctx.lineWidth = focus === d.mac || d.self ? 2.5 : 1.5;
         ctx.beginPath(); ctx.arc(xd, dy, 6, 0, 7); ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
         ctx.textAlign = 'left'; ctx.fillStyle = INK.text; ctx.font = focus === d.mac ? 'bold 11px system-ui' : '11px system-ui'; const name = (d.name || d.hostname || d.model_guess || d.mac).slice(0, 30); ctx.fillText(name, xd + 12, dy);
-        const nw = ctx.measureText(name).width; ctx.font = '11px system-ui'; ctx.fillStyle = INK.dim; ctx.fillText(`${d.type === 'Unknown' ? 'unknown type' : d.type}${d.ips[0] ? ' · ' + d.ips[0] : ''}`, xd + 20 + nw, dy);
+        const nw = ctx.measureText(name).width; ctx.font = '11px system-ui'; ctx.fillStyle = INK.dim; ctx.fillText(`${d.type === 'Unknown' ? 'unknown type' : d.type}${d.ips[0] ? ' · ' + d.ips[0] : ''}${!d.ap && d.conn ? ' · ' + d.conn.replace(/ \(.*\)$/, '') : ''}`, xd + 20 + nw, dy);
         hits.push({ x: xd, y: dy, r: 9, dev: d });
       });
       if (links) { y += b.hgt + GAP; continue; }
@@ -78,7 +78,7 @@ function tip(e) {
   const t = hit(e), box = $('#tip');
   if (!t) { box.hidden = true; e.target.style.cursor = 'default'; return; }
   e.target.style.cursor = 'pointer'; box.hidden = false; box.style.left = e.clientX + 14 + 'px'; box.style.top = e.clientY + 14 + 'px';
-  if (t.dev) { const d = t.dev; box.textContent = `${label(d)}\n${d.type} · ${AUTH[d.authorized][0]}\n${d.vendor || 'Maker unknown'}\n${d.ips[0] || ''} ${d.mac}\n${d.ap ? 'Link: ' + ({ manual: 'set by you', capture: 'seen in a capture', 'this PC': 'reported by this PC', simulated: 'simulated' }[d.ap_source] || d.ap_source) : 'Access point unknown'}`; }
+  if (t.dev) { const d = t.dev; box.textContent = `${label(d)}\n${d.type} · ${AUTH[d.authorized][0]}\n${d.vendor || 'Maker unknown'}\n${d.ips[0] || ''} ${d.mac}\n${d.ap ? 'Link: ' + ({ manual: 'set by you', capture: 'seen in a capture', 'this PC': 'reported by this PC', simulated: 'simulated', 'router list': 'from the router device list' }[d.ap_source] || d.ap_source) : 'Access point unknown'}`; }
   else { const n = t.ap, th = threatOf(n.bssid); box.textContent = `${n.ssid || '(hidden)'}\n${n.bssid}\n${n.ghost ? 'Not in range now' : `${n.band} GHz ch ${n.channel} · ${n.rssi} dBm · ${n.security}`}\n${th ? th.label : ''}\n${S.devices.filter(d => d.ap === n.bssid).length} known device(s)`; }
 }
 function ctxMenu(e) {
@@ -94,6 +94,7 @@ export function mount(el, arg) {
   el.append(
     h('div', { class: 'row', style: 'margin-bottom:8px' },
       h('div', { class: 'seg' }, [['mine', 'My network'], ['all', 'Everything in range']].map(([k, l]) => h('button', { id: 'sc-' + k, onclick: () => { scope = k; update(); } }, l))),
+      h('label', {}, h('input', { type: 'checkbox', checked: offlineHidden, onchange: e => { offlineHidden = e.target.checked; update(); } }), ' Hide offline devices'),
       h('span', { class: 'dim', id: 'mapinfo' }), h('span', { class: 'grow' }),
       [['#3ecf8e', 'Authorized'], ['#f0913a', 'Unreviewed'], ['#ef5b5b', 'Not authorized / rogue'], ['#8892a6', 'Other networks']].map(([c, l]) => h('span', {}, h('span', { class: 'dot', style: `background:${c}` }), l)),
       h('span', { class: 'dim' }, '■ access point  ● device  — observed link  ┄ assumed or set by you')),

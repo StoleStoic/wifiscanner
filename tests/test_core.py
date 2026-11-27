@@ -166,7 +166,11 @@ class Threats(unittest.TestCase):
     def test_classes(self):
         t, by = self.cls()
         self.assertEqual(by["02:1a:11:f3:9c:40"]["label"], "Evil twin / SSID spoof")
-        self.assertEqual(by["98:da:c4:5b:77:11"]["label"], "Rogue AP on your network")
+        self.assertEqual(by["98:da:c4:5b:77:11"]["label"], "AP attached to your network")
+        _, by2 = self.cls(lan=[dict(self.lan[0], authorized=False)])
+        self.assertEqual((by2["98:da:c4:5b:77:11"]["label"], by2["98:da:c4:5b:77:11"]["severity"]), ("Rogue AP on your network", "Critical"))
+        _, by3 = self.cls(lan=[dict(self.lan[0], known=True, authorized=True, name="Den extender")])
+        self.assertEqual(by3["98:da:c4:5b:77:11"]["label"], "Network of your own device")
         self.assertEqual(by["3e:28:6d:a1:10:01"]["cls"], "unauthorized")  # own IoT radio: asks, never "rogue"
         self.assertEqual(by["3c:28:6d:a1:10:02"]["cls"], "authorized")
         self.assertEqual(by["14:91:82:0c:4f:20"]["cls"], "neighbor")
@@ -175,7 +179,7 @@ class Threats(unittest.TestCase):
 
     def test_without_lan_scan_extender_is_not_rogue(self):
         _, by = self.cls(lan=[])
-        self.assertNotEqual(by["98:da:c4:5b:77:11"]["cls"], "rogue")
+        self.assertNotEqual(by["98:da:c4:5b:77:11"]["label"], "AP attached to your network")
 
     def test_accidental_association(self):
         t, _ = self.cls(conn={"ssid": "xfinitywifi", "bssid": "e6:f0:42:1d:77:b1", "rssi": -70})
@@ -333,3 +337,75 @@ class RealHome(unittest.TestCase):
         self.assertEqual([t["bssid"] for t in by.values() if t["label"] == "Evil twin / SSID spoof"], [])
         far = analysis.estimate_distance(dict(rssi=-79, freq=5300, band="5", tx_power=127))
         self.assertLess(far["m"], 200)  # a nonsense transmit-power report must not blow up the estimate
+
+
+class RouterList(unittest.TestCase):
+    SAMPLE = """MAC Address\t00:d2:b1:56:83:d2
+IPv4 Address / Name\t192.168.1.243 / amazon-bf873151a
+Last Activity\tThu Nov 26 18:54:30 2026
+Status\ton
+Allocation\tdhcp
+Connection Type\tEthernet LAN-2
+Connection Speed\t1000Mbps fullduplex
+Mesh Client\tNo
+IPv6 Address\tfe80::2d2:b1ff:fe56:83d2
+Type\tslaac
+Valid Lifetime\tforever
+MAC Address\t38:a5:c9:4e:d0:8e
+IPv4 Address / Name\t192.168.1.233 / unknown38a5c94ed08e
+Last Activity\tThu Nov 26 18:54:30 2026
+Status\ton
+Allocation\tdhcp
+Connection Type\tWi-Fi Wi-Fi 5 bars  
+2.4 GHz
+Type: Guest
+Name: GuestNet
+Connection Speed
+Mesh Client\tNo
+MAC Address\t84:e6:57:0e:16:51
+Name\tPS5
+Last Activity\tTue Nov 17 02:30:44 2026
+Status\toff
+Allocation\tdhcp
+Connection Type\tWi-Fi
+5 GHz Radio-2
+Type: Home
+Name: HomeNet
+Connection Speed
+Mesh Client\tNo
+"""
+
+    def test_parse_pasted_and_html(self):
+        from sursum import routerlist
+        for text in (self.SAMPLE, self.SAMPLE.replace("\t", "   "),
+                     routerlist.html_to_text("<table>" + "".join(
+                         f"<tr><th>{a}</th><td>{b}</td></tr>" if b or "\t" in ln else f"<tr><td>{a}</td></tr>"
+                         for ln in self.SAMPLE.splitlines() for a, _, b in [ln.partition("\t")]) + "</table>")):
+            d = routerlist.parse(text)
+            self.assertEqual([x["mac"] for x in d], ["00:d2:b1:56:83:d2", "38:a5:c9:4e:d0:8e", "84:e6:57:0e:16:51"], text[:60])
+            self.assertEqual((d[0]["ip"], d[0]["name"], d[0]["online"], d[0]["link"], d[0]["port"]),
+                             ("192.168.1.243", "amazon-bf873151a", True, "ethernet", "LAN-2"))
+            self.assertEqual((d[1]["name"], d[1]["link"], d[1]["band"], d[1]["ssid"], d[1]["net_type"]), ("", "wifi", "2.4", "GuestNet", "Guest"))
+            self.assertEqual((d[2]["name"], d[2]["online"], d[2]["band"], d[2]["ssid"]), ("PS5", False, "5", "HomeNet"))
+            self.assertLess(d[2]["seen"], d[0]["seen"])
+
+    def test_resolve_gateway_radio(self):
+        from sursum import routerlist
+        nets = [dict(bssid="0c:7c:28:97:89:ec", ssid="HomeNet", band="2.4"), dict(bssid="0c:7c:28:97:89:ed", ssid="GuestNet", band="2.4"),
+                dict(bssid="74:ac:b9:27:52:30", ssid="GuestNet", band="2.4"),  # another AP with the guest name
+                dict(bssid="0c:7c:28:97:89:f4", ssid="HomeNet", band="5"), dict(bssid="0c:7c:28:97:89:f0", ssid="HomeNet", band="5")]
+        d = routerlist.parse(self.SAMPLE)
+        self.assertEqual(routerlist.resolve_ap(d[1], nets, {"HomeNet"}), "0c:7c:28:97:89:ed")
+        self.assertIsNone(routerlist.resolve_ap(d[2], nets, {"HomeNet"}))   # two 5 GHz radios: not guessed
+        self.assertIsNone(routerlist.resolve_ap(d[0], nets, {"HomeNet"}))
+
+    def test_names_from_a_real_list(self):
+        from sursum.devices import guess_type
+        for host, vendor, want in [("32OnnRokuTV", "", "TV / streaming"), ("Amazon Fire TV", "Amazon", "TV / streaming"),
+                                   ("GoogleTV8513", "", "TV / streaming"), ("Hopper3-br", "Dish Technologies Corp", "TV / streaming"),
+                                   ("Joey_AP", "Dish Technologies Corp", "Network equipment"), ("HL_CAM4-80482CE03C12", "", "Camera"),
+                                   ("Canon22b25c", "CANON INC.", "Printer"), ("Sony PlayStation 4", "", "Game console"), ("PS5", "", "Game console"),
+                                   ("kindle-a0f006932", "", "Phone / tablet"), ("My-Info-s-Z-Fold8", "", "Phone / tablet"),
+                                   ("DESKTOP-IK9VS3F", "", "Computer"), ("chromeos", "", "Computer"), ("ZenWiFi_XT8-7780", "", "Network equipment"),
+                                   ("APNanoLivingRoom", "Ubiquiti Inc", "Network equipment")]:
+            self.assertEqual(guess_type(dict(hostname=host, vendor=vendor))[0], want, host)

@@ -4,8 +4,9 @@ import { S, nets, deviceAction, refreshDevices } from './state.js';
 
 let root, view = 'all', q = '', picked = new Set(), shown = null, timer = null, sort = { k: 'last_seen', dir: -1 };
 const PORTS = { 22: 'SSH', 80: 'Web page', 443: 'Secure web page', 445: 'Windows file sharing', 515: 'Printing', 548: 'Apple file sharing', 554: 'Camera video', 631: 'Printing', 1883: 'Smart-home messaging', 3389: 'Remote Desktop', 5000: 'UPnP / AirPlay', 7000: 'AirPlay', 8009: 'Chromecast', 8080: 'Web page', 9100: 'Printing', 62078: 'iPhone / iPad sync' };
-const VIEWS = { all: ['All', () => true], mine: ['On my network', d => d.sources.includes('lan')], pending: ['Unreviewed', d => d.authorized == null && d.sources.includes('lan')],
-  denied: ['Not authorized', d => d.authorized === false], unknown: ['Unknown type', d => d.type === 'Unknown'], other: ['Seen on other networks', d => !d.sources.includes('lan')] };
+export const mineDev = d => d.sources.includes('lan') || d.sources.includes('router');
+const VIEWS = { all: ['All', () => true], mine: ['On my network', mineDev], online: ['Online now', d => mineDev(d) && d.online], pending: ['Unreviewed', d => d.authorized == null && mineDev(d)],
+  denied: ['Not authorized', d => d.authorized === false], unknown: ['Unknown type', d => d.type === 'Unknown'], other: ['Seen on other networks', d => !mineDev(d)] };
 export const label = d => d.name || d.hostname || d.model_guess || (d.type !== 'Unknown' ? d.type : '') || d.mac;
 const apText = d => (d.ap ? `${d.ap_name ?? 'not in range'} · ${d.ap_band ?? d.ap}` : '');
 
@@ -26,6 +27,18 @@ async function identify(macs) {
   timer = setInterval(async () => { await refreshDevices(); const st = S.devStatus; if (!st.identify_running) { clearInterval(timer); st.identify.error ? toast(st.identify.error, true) : toast(`Claude identified ${st.identify.updated} of ${st.identify.asked} device(s).`); } }, 2500);
 }
 
+function importDialog() {
+  const done = r => { const i = r.imported; if (i.error) return toast(i.error, true); box.remove(); refreshDevices(r); toast(`Imported ${i.count} devices from the router: ${i.online} online now, ${i.wifi} on its own WiFi` + (i.linked ? `, ${i.linked} linked to an access point.` : '.')); view = 'mine'; render(); };
+  const area = h('textarea', { rows: 12, style: 'width:100%;font:12px Consolas,monospace', placeholder: 'Paste the Device List page here…' }), host = h('input', { type: 'text', value: '192.168.1.254', style: 'width:140px' });
+  const box = h('div', { id: 'about', onclick: e => e.target === box && box.remove() }, h('div', { style: 'max-width:640px;width:90%' },
+    h('h2', {}, 'Import the AT&T gateway device list'),
+    h('p', { class: 'dim' }, 'The gateway knows every device it has given an address to: ones that are switched off, ones behind your other routers and access points, and ones on a part of the network this PC cannot scan.'),
+    h('p', {}, h('b', {}, 'Option 1. '), 'Let the scanner read it from the gateway at ', host, ' ', h('button', { class: 'primary', onclick: async e => { e.target.disabled = true; e.target.textContent = 'Reading…'; const r = await api('/api/devices', { action: 'fetch', host: host.value.trim() }); e.target.disabled = false; e.target.textContent = 'Fetch now'; done(r); } }, 'Fetch now')),
+    h('p', {}, h('b', {}, 'Option 2. '), 'In a browser open the gateway page (Device > Device List), select everything (Ctrl+A), copy, and paste below.'), area,
+    h('div', { class: 'row', style: 'justify-content:flex-end;margin-top:12px' }, h('button', { onclick: () => box.remove() }, 'Cancel'), h('button', { class: 'primary', onclick: async () => done(await api('/api/devices', { action: 'import', text: area.value })) }, 'Import pasted text'))));
+  document.body.append(box);
+}
+
 export function mount(el, arg) {
   root = el; el.className = 'fill';
   if (arg?.mac) { shown = arg.mac; view = 'all'; q = ''; }
@@ -42,6 +55,7 @@ function render() {
       h('button', { class: 'primary', disabled: st.running, onclick: async () => { await api('/api/ipscan', {}); const t = setInterval(async () => { await refreshDevices(); if (!S.devStatus.running) { clearInterval(t); S.devStatus.error && toast(S.devStatus.error, true); } }, 700); } }, st.running ? `Scanning… ${Math.round(st.progress * 100)}%` : 'Scan my network'),
       h('div', { class: 'seg' }, Object.entries(VIEWS).map(([k, [l]]) => h('button', { class: k === view ? 'on' : '', onclick: () => { view = k; picked.clear(); render(); } }, `${l} (${count(k)})`))),
       h('input', { type: 'text', id: 'devq', placeholder: 'Search name, address, maker…', value: q, oninput: e => { q = e.target.value; table(); } }),
+      h('button', { title: 'Bring in the device list of your AT&T gateway: every device it knows, including ones this PC cannot reach', onclick: importDialog }, 'Import router list…'),
       h('button', { disabled: st.identify_running, title: 'Send the evidence for devices of unknown type to Claude for identification', onclick: () => identify((picked.size ? [...picked] : rs.filter(d => d.type === 'Unknown' || d.type_source === 'auto').map(d => d.mac))) }, st.identify_running ? 'Claude is identifying…' : picked.size ? `Identify ${picked.size} with Claude` : 'Identify with Claude'),
       h('button', { onclick: () => download('devices.csv', ['name,type,authorized,maker,ip,mac,hostname,access_point,link_source,first_seen,last_seen,notes', ...rs.map(d => [label(d), d.type, AUTH[d.authorized][0], d.vendor, d.ips[0] || '', d.mac, d.hostname, apText(d), d.ap_source || '', new Date(d.first_seen * 1000).toISOString(), new Date(d.last_seen * 1000).toISOString(), d.notes].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\r\n'), 'text/csv') }, 'Export CSV')),
     picked.size ? h('div', { class: 'filterbar' }, h('b', {}, `${picked.size} selected:`),
@@ -64,7 +78,7 @@ function table() {
         d.self ? h('span', { class: 'badge info', style: 'margin-left:6px' }, 'This PC') : d.gateway ? h('span', { class: 'badge info', style: 'margin-left:6px' }, 'Router') : null),
       h('td', {}, authSel(d)), h('td', {}, typeSel(d), d.type_source === 'claude' ? h('span', { class: 'badge info', style: 'margin-left:5px' }, 'Claude') : null),
       h('td', {}, d.vendor), h('td', {}, d.ips[0] || ''), h('td', {}, d.mac, d.random_mac ? h('span', { class: 'badge', style: 'margin-left:6px', title: 'Randomised private address' }, 'private') : null),
-      h('td', {}, d.ap ? apText(d) : h('span', { class: 'dim' }, d.sources.includes('lan') ? 'My network — access point unknown' : '')), h('td', {}, stamp(d.last_seen))))
+      h('td', { title: d.conn || '' }, d.ap ? apText(d) : h('span', { class: 'dim' }, d.conn ? d.conn.replace(/ \(.*\)$/, '') : mineDev(d) ? 'My network — access point unknown' : '')), h('td', {}, stamp(d.last_seen))))
       : h('tr', {}, h('td', { colspan: 9, class: 'dim', style: 'padding:26px;text-align:center' }, S.devices.length ? 'No devices in this view.' : 'No devices yet. Click "Scan my network" to list everything connected to your network.'))));
 }
 
@@ -76,7 +90,7 @@ function detail() {
   const aps = nets().filter(n => n.threat === 'authorized' || n.bssid === d.ap).map(n => [n.bssid, `${n.ssid || '(hidden)'} · ${n.band} GHz ch ${n.channel} · ${n.bssid}`]);
   if (d.ap && !aps.some(a => a[0] === d.ap)) aps.push([d.ap, `${d.ap} (not in range now)`]);
   const dl = pairs => h('dl', {}, pairs.filter(p => p[1] != null && p[1] !== '').flatMap(([a, b]) => [h('dt', {}, a), h('dd', {}, b)]));
-  const SRC = { 'this PC': 'reported by this PC', capture: 'seen in a capture file', manual: 'set by you', simulated: 'simulated (demo)' };
+  const SRC = { 'this PC': 'reported by this PC', capture: 'seen in a capture file', manual: 'set by you', simulated: 'simulated (demo)', 'router list': 'from the router device list' };
   box.replaceChildren(
     h('div', { class: 'row' }, h('h2', { class: 'grow', style: 'margin:0' }, label(d)), h('button', { class: 'small', onclick: () => window.sursumGo('map', { mac: d.mac }) }, 'Show on map')),
     h('h3', {}, 'Yours to set'),
@@ -89,9 +103,9 @@ function detail() {
       ['MAC address', d.mac + (d.random_mac ? ' (private, randomised: it can change, and then appears as a new device)' : '')],
       ['IP address', d.ips.join(', ')], ['Network name', d.hostname], ['Describes itself as', d.upnp],
       ['Services answering', d.ports.length ? d.ports.map(p => `${PORTS[p] || 'port'} (${p})`).join(', ') : d.sources.includes('lan') ? 'None of the common ones' : null],
-      ['Connected to', d.ap ? `${apText(d)} — ${SRC[d.ap_source] || d.ap_source}` : d.sources.includes('lan') ? 'Your network; the access point is not known. Windows cannot observe this from the air. Set it above if you know it.' : null],
-      ['Signal in capture', d.rssi != null ? d.rssi + ' dBm' : null], ['Seen by', d.sources.map(s => ({ lan: 'network scan', capture: 'capture file' }[s] || s)).join(', ')],
-      ['Status', d.online ? 'Online in the last network scan' : 'Not in the last network scan'], ['First seen', stamp(d.first_seen)], ['Last seen', stamp(d.last_seen)]]),
+      ['Connected to', d.ap ? `${apText(d)} — ${SRC[d.ap_source] || d.ap_source}` : mineDev(d) ? 'Your network; the access point is not known. Windows cannot observe this from the air. Set it above if you know it.' : null],
+      ['According to the router', d.conn], ['Signal in capture', d.rssi != null ? d.rssi + ' dBm' : null], ['Seen by', d.sources.map(s => ({ lan: 'network scan', capture: 'capture file', router: 'router device list' }[s] || s)).join(', ')],
+      ['Status', d.online ? 'Online in the last scan or router list' : 'Offline in the last scan or router list'], ['First seen', stamp(d.first_seen)], ['Last seen', stamp(d.last_seen)]]),
     h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { onclick: () => identify([d.mac]) }, 'Identify with Claude'),
       h('button', { class: 'danger', onclick: () => confirm('Forget this device? It reappears if seen again.') && deviceAction('forget', [d.mac]).then(() => { shown = null; detail(); }) }, 'Forget device')));
 }

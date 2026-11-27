@@ -59,10 +59,10 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
     auth, neigh, home = ctx["auth"], ctx["neigh"], ctx["home"]
     exp = float(settings["home"].get("path_loss_exp", 3.0))
     perimeter = float(settings["home"].get("perimeter_m", 15))
-    # LAN devices that could be an unapproved AP's wired side: not this PC, not the router,
-    # not something you marked as known, and not an authorized AP's own interface.
-    lan_macs = [d["mac"] for d in lan if d.get("mac") and not (d.get("self") or d.get("gateway") or d.get("known"))
-                and d["mac"] not in auth and not any(_near(a, d["mac"]) for a in auth)]
+    # Devices on your own network, to match against radios in the air: a BSSID belonging to the
+    # same unit as a LAN device means that device is also broadcasting WiFi.
+    lan_devs = [d for d in lan if d.get("mac") and not (d.get("self") or d.get("gateway"))
+                and d["mac"] not in auth and not any(oui.same_unit(a, d["mac"]) or _near(a, d["mac"]) for a in auth)]
     auth_sec = {n["ssid"]: n["security"] for n in nets if n["bssid"] in auth}
     items = []
     for n in nets:
@@ -70,7 +70,7 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
         dist = estimate_distance(n, exp)
         it = {"bssid": b, "ssid": n["ssid"], "band": n["band"], "channel": n["channel"], "rssi": n["rssi"],
               "security": n["security"], "vendor": n["vendor"], "distance": dist, "reasons": []}
-        lan_hit = next((m for m in lan_macs if m == b or _near(m, b)), None)
+        lan_hit = next((d for d in lan_devs if d["mac"] == b or oui.same_unit(d["mac"], b) or _near(d["mac"], b)), None)
         if b in auth:
             it.update(cls="authorized", severity="Info", label=auth[b] or "Authorized AP")
         elif b in neigh:
@@ -100,9 +100,20 @@ def classify(nets: list[dict], conn: dict | None, settings: dict, lan: list[dict
                                      "radio is not in your authorized list. If it is one of your access points, "
                                      "authorize it; if you do not recognise it, locate it.")
         elif lan_hit:
-            it.update(cls="rogue", severity="Critical", label="Rogue AP on your network")
-            it["reasons"].append(f"Its radio address matches or sits next to {lan_hit}, a device found on your wired/LAN side. "
-                                 "An unapproved AP appears to be plugged into your network.")
+            who = lan_hit.get("name") or lan_hit.get("hostname") or lan_hit["mac"]
+            if lan_hit.get("authorized") is False:
+                it.update(cls="rogue", severity="Critical", label="Rogue AP on your network")
+                it["reasons"].append(f"This radio belongs to {who} ({lan_hit['mac']}), a device on your network that you "
+                                     "marked as not authorized. An unapproved access point is attached to your network.")
+            elif lan_hit.get("known"):
+                it.update(cls="neighbor", severity="Low", label="Network of your own device")
+                it["reasons"].append(f"Broadcast by your authorized device {who} (TVs, printers, satellite boxes and "
+                                     "extenders often run a small network of their own). Mark it as Mine to stop seeing it here.")
+            else:
+                it.update(cls="unauthorized", severity="High", label="AP attached to your network")
+                it["reasons"].append(f"This radio belongs to {who} ({lan_hit['mac']}), a device on your network that you "
+                                     "have not reviewed yet. Review that device in the Devices tab: if it is yours this "
+                                     "is harmless, if not it is a rogue access point.")
         elif any(oui.same_unit(a, b) or _near(a, b) for a in auth):
             it.update(cls="unauthorized", severity="Low", label="Unlisted radio of your AP")
             it["reasons"].append("Belongs to the same unit as one of your authorized APs (a guest, IoT, hidden or "
